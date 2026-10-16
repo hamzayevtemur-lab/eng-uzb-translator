@@ -123,7 +123,7 @@ def main():
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     MAX_SAMPLES = 45000       # Use large dataset (out of 48k pairs)
-    MIN_FREQ = 2              # Filters single-occurrence rare words to avoid overfitting
+    MIN_FREQ = 1              # Keep all words from dataset to prevent UNK inflation
     EMBEDDING_DIM = 256
     HIDDEN_DIM = 512
     BATCH_SIZE = 64

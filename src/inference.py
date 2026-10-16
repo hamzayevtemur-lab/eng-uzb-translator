@@ -63,6 +63,11 @@ def translate_attention(
         # Record attention weights for this word: [src_len]
         attention_weights_list.append(attn_weights.squeeze(0).cpu())
 
+        # Mask out special non-word tokens so decoder never outputs PAD, SOS, or UNK
+        logits[:, PAD_TOKEN] = -float("inf")
+        logits[:, SOS_TOKEN] = -float("inf")
+        logits[:, UNK_TOKEN] = -float("inf")
+
         top1 = logits.argmax(dim=-1).item()
         if top1 == EOS_TOKEN:
             break
@@ -107,6 +112,12 @@ def translate_baseline(
 
     for _ in range(max_length):
         logits, hidden = model.decoder(input_token, hidden)
+
+        # Mask out special non-word tokens
+        logits[:, PAD_TOKEN] = -float("inf")
+        logits[:, SOS_TOKEN] = -float("inf")
+        logits[:, UNK_TOKEN] = -float("inf")
+
         top1 = logits.argmax(dim=-1).item()
         if top1 == EOS_TOKEN:
             break
