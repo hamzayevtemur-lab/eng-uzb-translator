@@ -10,42 +10,43 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import torch
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Add project root and src to path
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 sys.path.insert(0, str(BASE_DIR / "src"))
 
-from src.dataset import Vocabulary, normalize_string, SOS_TOKEN, EOS_TOKEN
-from src.model_baseline import Encoder as BaselineEncoder, Decoder as BaselineDecoder, Seq2SeqBaseline
-from src.model_attention import Encoder as AttentionEncoder, Decoder as AttentionDecoder, Seq2SeqAttention
-from src.inference import translate_attention, translate_baseline
+from dataset import Vocabulary, normalize_string, SOS_TOKEN, EOS_TOKEN
+from model_baseline import Decoder as BaselineDecoder, Seq2SeqBaseline
+from model_attention import Encoder, Decoder as AttentionDecoder, Seq2SeqAttention
+from inference import translate_attention, beam_search_attention, translate_baseline
 
 app = FastAPI(
     title="TarjimaAI | English-Uzbek Seq2Seq Neural Translator",
     description="Interactive Neural Machine Translation featuring Bahdanau Additive Attention and Live Alignment Heatmaps",
-    version="1.0.0"
+    version="1.1.0"
 )
 
+# Standardized CORS Configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Static directory
+# Static files
 STATIC_DIR = BASE_DIR / "app" / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# Device detection
+# Hardware detection
 if torch.backends.mps.is_available():
     DEVICE = torch.device("mps")
 elif torch.cuda.is_available():
@@ -73,7 +74,7 @@ def init_models():
         try:
             eng_vocab = Vocabulary.load(str(vocab_eng_path))
             uzb_vocab = Vocabulary.load(str(vocab_uzb_path))
-            print(f"[TarjimaAI] Loaded vocabularies: English ({eng_vocab.n_words} words), Uzbek ({uzb_vocab.n_words} words)")
+            print(f"[TarjimaAI] Loaded vocabularies: English ({eng_vocab.n_words:,} words), Uzbek ({uzb_vocab.n_words:,} words)")
         except Exception as e:
             print(f"[TarjimaAI] Error loading vocabularies: {e}")
 
@@ -81,9 +82,14 @@ def init_models():
     attn_path = CHECKPOINT_DIR / "seq2seq_attention.pth"
     if attn_path.exists() and eng_vocab and uzb_vocab:
         try:
-            state = torch.load(str(attn_path), map_location=DEVICE)
-            enc = AttentionEncoder(eng_vocab.n_words, state["embedding_dim"], state["hidden_dim"])
-            dec = AttentionDecoder(uzb_vocab.n_words, state["embedding_dim"], state["hidden_dim"])
+            state = torch.load(str(attn_path), map_location=DEVICE, weights_only=True)
+            enc = Encoder(eng_vocab.n_words, state["embedding_dim"], state["hidden_dim"])
+            dec = AttentionDecoder(
+                uzb_vocab.n_words, 
+                state["embedding_dim"], 
+                state["hidden_dim"] * 2,  # Bidirectional encoder state
+                state["hidden_dim"]
+            )
             attention_model = Seq2SeqAttention(enc, dec, DEVICE).to(DEVICE)
             attention_model.load_state_dict(state["model_state_dict"])
             attention_model.eval()
@@ -95,8 +101,8 @@ def init_models():
     base_path = CHECKPOINT_DIR / "seq2seq_baseline.pth"
     if base_path.exists() and eng_vocab and uzb_vocab:
         try:
-            state = torch.load(str(base_path), map_location=DEVICE)
-            enc = BaselineEncoder(eng_vocab.n_words, state["embedding_dim"], state["hidden_dim"])
+            state = torch.load(str(base_path), map_location=DEVICE, weights_only=True)
+            enc = Encoder(eng_vocab.n_words, state["embedding_dim"], state["hidden_dim"])
             dec = BaselineDecoder(uzb_vocab.n_words, state["embedding_dim"], state["hidden_dim"])
             baseline_model = Seq2SeqBaseline(enc, dec, DEVICE).to(DEVICE)
             baseline_model.load_state_dict(state["model_state_dict"])
@@ -106,18 +112,19 @@ def init_models():
             print(f"[TarjimaAI] Error loading baseline model: {e}")
 
 
-# Initialize on startup
+# Initialize on server startup
 init_models()
 
 
 class TranslationRequest(BaseModel):
-    text: str
-    model_type: Optional[str] = "attention"  # "attention", "baseline", "both"
-    max_length: Optional[int] = 30
+    text: str = Field(..., min_length=1, max_length=500, description="English sentence to translate")
+    model_type: Optional[str] = Field("attention", pattern="^(attention|baseline|both)$")
+    max_length: Optional[int] = Field(30, ge=1, le=100)
+    beam_width: Optional[int] = Field(1, ge=1, le=5)
 
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_index():
+def serve_index():
     """Serves the main web interface."""
     index_file = STATIC_DIR / "index.html"
     if index_file.exists():
@@ -127,7 +134,7 @@ async def serve_index():
 
 
 @app.get("/api/status")
-async def get_system_status():
+def get_system_status():
     """Returns telemetry on loaded models, vocabularies, and hardware accelerator."""
     return {
         "status": "online",
@@ -144,51 +151,60 @@ async def get_system_status():
     }
 
 
+# CPU/GPU-bound inference runs in synchronous threadpool to prevent blocking the event loop
 @app.post("/api/translate")
-async def translate_endpoint(req: TranslationRequest):
+def translate_endpoint(req: TranslationRequest):
     """
-    Translates an English sentence to Uzbek.
+    Translates an English sentence to Uzbek using real neural network inference.
     Returns translation text, tokens, inference latency, and the 2D attention alignment matrix.
     """
-    if not req.text.strip():
+    clean_text = req.text.strip()
+    if not clean_text:
         raise HTTPException(status_code=400, detail="Input text cannot be empty.")
 
     # Re-check models if not loaded
     if eng_vocab is None or uzb_vocab is None:
         init_models()
 
-    if eng_vocab is None or uzb_vocab is None:
-        return {
-            "source_text": req.text,
-            "translated_text": "Model checkpoints not found yet. Please train the models using python3 src/train.py first.",
-            "translated_tokens": [],
-            "source_tokens": req.text.split(),
-            "attention_matrix": [],
-            "latency_ms": 0,
-            "status": "no_checkpoints"
-        }
+    if eng_vocab is None or uzb_vocab is None or (attention_model is None and baseline_model is None):
+        raise HTTPException(
+            status_code=503,
+            detail="Model checkpoints not loaded. Please train models using 'python3 src/train.py' first."
+        )
 
-    clean_src = normalize_string(req.text, is_uzbek=False)
+    clean_src = normalize_string(clean_text, is_uzbek=False)
     src_tokens = ["<SOS>"] + clean_src.split() + ["<EOS>"]
     
     t0 = time.time()
     result: Dict[str, Any] = {
-        "source_text": req.text,
+        "source_text": clean_text,
         "clean_source": clean_src,
         "source_tokens": src_tokens,
-        "model_type": req.model_type
+        "model_type": req.model_type,
+        "beam_width": req.beam_width
     }
 
-    # 1. Translate with Attention
+    # 1. Translate with Bahdanau Attention
     if req.model_type in ("attention", "both") and attention_model:
-        tokens, attn_matrix = translate_attention(
-            sentence=req.text,
-            model=attention_model,
-            eng_vocab=eng_vocab,
-            uzb_vocab=uzb_vocab,
-            max_length=req.max_length,
-            device=DEVICE
-        )
+        if req.beam_width and req.beam_width > 1:
+            tokens, attn_matrix = beam_search_attention(
+                sentence=clean_text,
+                model=attention_model,
+                eng_vocab=eng_vocab,
+                uzb_vocab=uzb_vocab,
+                beam_width=req.beam_width,
+                max_length=req.max_length,
+                device=DEVICE
+            )
+        else:
+            tokens, attn_matrix = translate_attention(
+                sentence=clean_text,
+                model=attention_model,
+                eng_vocab=eng_vocab,
+                uzb_vocab=uzb_vocab,
+                max_length=req.max_length,
+                device=DEVICE
+            )
         result["translated_tokens"] = tokens
         result["translated_text"] = " ".join(tokens)
         result["attention_matrix"] = attn_matrix.tolist()
@@ -197,10 +213,10 @@ async def translate_endpoint(req: TranslationRequest):
         result["translated_text"] = ""
         result["attention_matrix"] = []
 
-    # 2. Translate with Baseline (if requested or in comparison mode)
+    # 2. Translate with Baseline
     if req.model_type in ("baseline", "both") and baseline_model:
         base_tokens = translate_baseline(
-            sentence=req.text,
+            sentence=clean_text,
             model=baseline_model,
             eng_vocab=eng_vocab,
             uzb_vocab=uzb_vocab,
@@ -213,8 +229,7 @@ async def translate_endpoint(req: TranslationRequest):
             result["translated_tokens"] = base_tokens
             result["translated_text"] = " ".join(base_tokens)
 
-    elapsed_ms = round((time.time() - t0) * 1000, 2)
-    result["latency_ms"] = elapsed_ms
+    result["latency_ms"] = round((time.time() - t0) * 1000, 2)
     result["status"] = "success"
 
     return result
@@ -222,4 +237,4 @@ async def translate_endpoint(req: TranslationRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8080, reload=True)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8080)

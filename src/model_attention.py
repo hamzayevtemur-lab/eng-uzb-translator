@@ -1,197 +1,230 @@
 """
-Attention-Augmented Seq2Seq Model (Bahdanau et al., 2015)
-Computes dynamic context vectors at every decoding timestep
-and records attention weights for alignment visualization.
+Attention-Augmented Seq2Seq Model (Bahdanau et al., 2015).
+Features:
+- Bidirectional GRU Encoder with pack_padded_sequence to eliminate the <PAD> processing bug
+- Bridge projection layer mapping [h_forward; h_backward] -> s_0
+- Bahdanau Additive Attention with U_a in R^{d x 2d} matching the theoretical formulation
+- Dynamic context vector routing at every decoding timestep
 """
 
 import random
+from typing import Tuple, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Optional
 
-# Special token index from dataset module
-PAD_TOKEN = 0
+from dataset import PAD_TOKEN
 
 
-# 1. ATTENTION ENCODER
-
+# ---------------------------------------------------------------------------
+# 1. BIDIRECTIONAL ENCODER WITH PACKED SEQUENCE SUPPORT
+# ---------------------------------------------------------------------------
 class Encoder(nn.Module):
     """
-    Encodes English sentences and preserves ALL hidden states at every timestep.
+    Bidirectional GRU Encoder that processes variable-length sequences.
+    Uses pack_padded_sequence so the final hidden state strictly reflects the
+    last non-pad token, eliminating padding degradation.
     """
     def __init__(
-        self, 
-        input_size: int, 
-        embedding_dim: int, 
-        hidden_size: int, 
+        self,
+        input_size: int,
+        embedding_dim: int,
+        hidden_size: int,
         num_layers: int = 1,
-        dropout: float = 0.1
+        dropout: float = 0.3
     ):
         super().__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
         self.embedding = nn.Embedding(input_size, embedding_dim, padding_idx=PAD_TOKEN)
         self.dropout = nn.Dropout(dropout)
+        
         self.gru = nn.GRU(
             input_size=embedding_dim,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
+            bidirectional=True,
             dropout=dropout if num_layers > 1 else 0.0
         )
-    def forward(self, source_tokens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            source_tokens: [batch_size, source_length]
-        Returns:
-            outputs: [batch_size, source_length, hidden_size] — all encoder states (Keys/Values)
-            hidden:  [num_layers, batch_size, hidden_size] — final state
-        """
-        embedded = self.dropout(self.embedding(source_tokens))
-        outputs, hidden = self.gru(embedded)
-        return outputs, hidden
 
-
-# 2. BAHDANAU (ADDITIVE) ATTENTION MODULE
-
-class BahdanauAttention(nn.Module):
-    """
-    Additive Attention:
-    score(s_{t-1}, h_i) = v_a^T * tanh(W_a * s_{t-1} + U_a * h_i)
-    """
-    def __init__(self, hidden_size: int):
-        super().__init__()
-
-        # Projects encoder states h_i (Keys)
-        self.encoder_projection = nn.Linear(hidden_size, hidden_size, bias=False)
-
-        # Projects decoder state s_{t-1} (Query)
-        self.decoder_projection = nn.Linear(hidden_size, hidden_size, bias=False)
-
-        # Alignment energy vector v_a
-        self.energy = nn.Linear(hidden_size, 1, bias=False)
-
+        # Bridge layer: s_0 = tanh(W_bridge * [h_forward; h_backward])
+        # Projects concatenated bidirectional states (2 * hidden_size) to decoder state (hidden_size)
+        self.fc_bridge = nn.Linear(hidden_size * 2, hidden_size)
 
     def forward(
         self, 
-        decoder_hidden: torch.Tensor, 
-        encoder_outputs: torch.Tensor, 
-        source_mask: Optional[torch.Tensor] = None
-    )-> Tuple[torch.Tensor, torch.Tensor]:
+        source_tokens: torch.Tensor, 
+        src_lengths: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
-            decoder_hidden:  [batch_size, hidden_size] — Query
-            encoder_outputs: [batch_size, source_length, hidden_size] — Keys/Values
-            source_mask:     [batch_size, source_length] — True for real tokens, False for PAD
+            source_tokens: [batch_size, source_length] — token IDs
+            src_lengths:   [batch_size] — actual sequence lengths (excluding <PAD>)
         Returns:
-            context:           [batch_size, 1, hidden_size] — dynamic weighted representation
-            attention_weights: [batch_size, source_length] — softmax distribution
+            outputs: [batch_size, source_length, hidden_size * 2] — bidirectional encoder annotations h_i
+            s0:      [1, batch_size, hidden_size] — initial decoder hidden state
         """
-        # 1. Project keys and query
-        encoder_features = self.encoder_projection(encoder_outputs)  # [batch, src_len, hidden]
-        decoder_features = self.decoder_projection(decoder_hidden).unsqueeze(1)  # [batch, 1, hidden]
+        embedded = self.dropout(self.embedding(source_tokens))
 
-        # 2. Additive combination: tanh(W * s + U * h)
-        combined = torch.tanh(encoder_features + decoder_features)  # [batch, src_len, hidden]
+        if src_lengths is not None:
+            # Move lengths to CPU for packing (PyTorch requirement)
+            packed = nn.utils.rnn.pack_padded_sequence(
+                embedded,
+                src_lengths.cpu(),
+                batch_first=True,
+                enforce_sorted=False
+            )
+            packed_outputs, hidden = self.gru(packed)
+            outputs, _ = nn.utils.rnn.pad_packed_sequence(packed_outputs, batch_first=True)
+        else:
+            outputs, hidden = self.gru(embedded)
 
-        # 3. Alignment energy scores: [batch, src_len]
+        # hidden shape: [2 * num_layers, batch_size, hidden_size]
+        # Extract the last layer's forward and backward hidden states
+        h_forward = hidden[-2, :, :]
+        h_backward = hidden[-1, :, :]
+        bridge_input = torch.cat([h_forward, h_backward], dim=1)  # [batch, hidden_size * 2]
+        s0 = torch.tanh(self.fc_bridge(bridge_input)).unsqueeze(0)  # [1, batch, hidden_size]
+
+        return outputs, s0
+
+
+# ---------------------------------------------------------------------------
+# 2. BAHDANAU (ADDITIVE) ATTENTION MODULE
+# ---------------------------------------------------------------------------
+class BahdanauAttention(nn.Module):
+    """
+    Bahdanau Additive Attention:
+    score(s_{t-1}, h_i) = v_a^T * tanh(W_a * s_{t-1} + U_a * h_i)
+    
+    Where:
+        h_i in R^{2d} (bidirectional encoder outputs)
+        s_{t-1} in R^{d} (unidirectional decoder hidden state)
+        U_a in R^{d x 2d}
+        W_a in R^{d x d}
+        v_a in R^{d}
+    """
+    def __init__(self, enc_hidden_size: int, dec_hidden_size: int):
+        super().__init__()
+        # Projects encoder annotations h_i: [batch, src_len, enc_hidden_size] -> [batch, src_len, dec_hidden_size]
+        self.encoder_projection = nn.Linear(enc_hidden_size, dec_hidden_size, bias=False)
+
+        # Projects decoder state s_{t-1}: [batch, dec_hidden_size] -> [batch, dec_hidden_size]
+        self.decoder_projection = nn.Linear(dec_hidden_size, dec_hidden_size, bias=False)
+
+        # Alignment energy vector v_a
+        self.energy = nn.Linear(dec_hidden_size, 1, bias=False)
+
+    def forward(
+        self,
+        decoder_hidden: torch.Tensor,
+        encoder_outputs: torch.Tensor,
+        source_mask: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            decoder_hidden:  [batch_size, dec_hidden_size] — s_{t-1} query
+            encoder_outputs: [batch_size, src_len, enc_hidden_size] — h_i keys/values
+            source_mask:     [batch_size, src_len] — True for non-pad tokens
+        Returns:
+            context:           [batch_size, 1, enc_hidden_size] — dynamic context vector c_t
+            attention_weights: [batch_size, src_len] — alpha_{t, i} softmax distribution
+        """
+        # [batch, src_len, dec_hidden_size]
+        encoder_features = self.encoder_projection(encoder_outputs)
+
+        # [batch, 1, dec_hidden_size]
+        decoder_features = self.decoder_projection(decoder_hidden).unsqueeze(1)
+
+        # Additive combination: tanh(U_a * h_i + W_a * s_{t-1})
+        combined = torch.tanh(encoder_features + decoder_features)
+
+        # Alignment scores: [batch, src_len]
         scores = self.energy(combined).squeeze(-1)
 
-        # 4. Mask out <PAD> positions with -infinity so softmax gives them 0.0 weight
+        # Mask padding tokens so their attention weight is 0.0
         if source_mask is not None:
             scores = scores.masked_fill(~source_mask, float("-inf"))
 
-        # 5. Softmax across source sequence positions
-        attention_weights = F.softmax(scores, dim=1)  # [batch, src_len]
+        # Softmax across source sequence tokens
+        attention_weights = F.softmax(scores, dim=-1)
 
-        # 6. Weighted sum: [batch, 1, src_len] x [batch, src_len, hidden] -> [batch, 1, hidden]
+        # Context vector c_t: [batch, 1, src_len] x [batch, src_len, enc_hidden_size] -> [batch, 1, enc_hidden_size]
         context = torch.bmm(attention_weights.unsqueeze(1), encoder_outputs)
 
         return context, attention_weights
 
 
+# ---------------------------------------------------------------------------
 # 3. ATTENTION DECODER
+# ---------------------------------------------------------------------------
 class Decoder(nn.Module):
     """
-    Decodes target Uzbek tokens using both the previous token embedding
-    and the dynamic context vector computed by Bahdanau attention.
+    Decodes target Uzbek tokens conditioned on previous token embedding
+    and the dynamic Bahdanau context vector.
     """
     def __init__(
-        self, output_size: int,
+        self,
+        output_size: int,
         embedding_dim: int,
-        hidden_size: int,
-        num_layers: int=1,
-        dropout: float=0.1
+        enc_hidden_size: int,
+        dec_hidden_size: int,
+        num_layers: int = 1,
+        dropout: float = 0.3
     ):
         super().__init__()
         self.embedding = nn.Embedding(output_size, embedding_dim, padding_idx=PAD_TOKEN)
         self.dropout = nn.Dropout(dropout)
-        self.attention = BahdanauAttention(hidden_size)
+        self.attention = BahdanauAttention(enc_hidden_size, dec_hidden_size)
 
-        # GRU input receives [embedding; context_vector]
+        # GRU input: [y_{t-1}; c_t]
         self.gru = nn.GRU(
-            input_size=embedding_dim + hidden_size,
-            hidden_size=hidden_size,
+            input_size=embedding_dim + enc_hidden_size,
+            hidden_size=dec_hidden_size,
             num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0
         )
 
-        # Linear classifier receives [gru_output; context_vector]
-        self.fc_out = nn.Linear(hidden_size * 2, output_size)
+        # Vocabulary projection: [s_t; c_t] -> vocab_size
+        self.fc_out = nn.Linear(dec_hidden_size + enc_hidden_size, output_size)
 
     def forward(
-        self, 
-        input_token: torch.Tensor, 
-        hidden: torch.Tensor, 
-        encoder_outputs: torch.Tensor, 
+        self,
+        input_token: torch.Tensor,
+        hidden: torch.Tensor,
+        encoder_outputs: torch.Tensor,
         source_mask: Optional[torch.Tensor] = None
-    )-> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Runs one decoding step with attention.
-        
-        Args:
-            input_token:     [batch_size, 1] — current target token ID
-            hidden:          [num_layers, batch_size, hidden_size] — previous GRU state
-            encoder_outputs: [batch_size, source_length, hidden_size]
-            source_mask:     [batch_size, source_length]
-        Returns:
-            logits:            [batch_size, output_size]
-            hidden:            [num_layers, batch_size, hidden_size]
-            attention_weights: [batch_size, source_length]
-        """
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         embedded = self.dropout(self.embedding(input_token))  # [batch, 1, emb_dim]
-        last_hidden_layer = hidden[-1]  # [batch, hidden_size]
+        last_hidden = hidden[-1]  # [batch, dec_hidden_size]
 
-        # 1. Compute dynamic attention context vector and weights
-        context, attention_weights = self.attention(last_hidden_layer, encoder_outputs, source_mask)
+        context, attention_weights = self.attention(last_hidden, encoder_outputs, source_mask)
 
-        # 2. Concatenate input embedding with context vector
-        gru_input = torch.cat([embedded, context], dim=2)  # [batch, 1, emb_dim + hidden_size]
+        # Concat [y_{t-1}; c_t]
+        gru_input = torch.cat([embedded, context], dim=2)
+        output, hidden = self.gru(gru_input, hidden)
 
-        # 3. Step GRU
-        output, hidden = self.gru(gru_input, hidden)  # output: [batch, 1, hidden_size]
-
-        # 4. Concatenate GRU output and context for vocabulary projection
-        output_flat = output.squeeze(1)
-        context_flat = context.squeeze(1)
-        combined = torch.cat([output_flat, context_flat], dim=1)  # [batch, hidden_size * 2]
-
-        logits = self.fc_out(combined)  # [batch, output_size]
+        # Concat [s_t; c_t]
+        combined = torch.cat([output.squeeze(1), context.squeeze(1)], dim=1)
+        logits = self.fc_out(combined)
 
         return logits, hidden, attention_weights
 
 
-
+# ---------------------------------------------------------------------------
 # 4. UNIFIED SEQ2SEQ ATTENTION WRAPPER
+# ---------------------------------------------------------------------------
 class Seq2SeqAttention(nn.Module):
     """
-    Coordinates Encoder and Attention-Augmented Decoder with Teacher Forcing.
+    Coordinates Bidirectional Encoder and Attention-Augmented Decoder.
     """
     def __init__(
-        self, 
-        encoder: Encoder, 
-        decoder: Decoder, 
-        device: torch.device, 
+        self,
+        encoder: Encoder,
+        decoder: Decoder,
+        device: torch.device,
         teacher_forcing_ratio: float = 0.5
     ):
         super().__init__()
@@ -201,41 +234,30 @@ class Seq2SeqAttention(nn.Module):
         self.teacher_forcing_ratio = teacher_forcing_ratio
 
     def forward(
-        self, 
-        source: torch.Tensor, 
-        target: torch.Tensor, 
+        self,
+        source: torch.Tensor,
+        target: torch.Tensor,
+        src_lengths: Optional[torch.Tensor] = None,
         source_mask: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Training forward pass.
-        
-        Args:
-            source:      [batch_size, source_length]
-            target:      [batch_size, target_length]
-            source_mask: [batch_size, source_length]
-        Returns:
-            outputs:           [batch_size, target_length - 1, output_vocab_size]
-            attention_history: [batch_size, target_length - 1, source_length]
-        """
         batch_size = source.size(0)
         target_len = target.size(1)
         source_len = source.size(1)
         output_vocab_size = self.decoder.fc_out.out_features
 
-        # Auto-compute mask if not provided (True for real tokens, False for PAD)
         if source_mask is None:
             source_mask = (source != PAD_TOKEN)
 
         outputs = torch.zeros(batch_size, target_len - 1, output_vocab_size, device=self.device)
         attention_history = torch.zeros(batch_size, target_len - 1, source_len, device=self.device)
 
-        # 1. ENCODE: Keep all encoder hidden states
-        encoder_outputs, hidden = self.encoder(source)
+        # 1. Encode with packing to eliminate pad corruption
+        encoder_outputs, hidden = self.encoder(source, src_lengths=src_lengths)
 
         # 2. First decoder input is target <SOS>
         input_token = target[:, 0].unsqueeze(1)
 
-        # 3. DECODE with attention step-by-step
+        # 3. Decode step-by-step
         for t in range(1, target_len):
             logits, hidden, attn_weights = self.decoder(
                 input_token, hidden, encoder_outputs, source_mask
@@ -243,38 +265,8 @@ class Seq2SeqAttention(nn.Module):
             outputs[:, t - 1] = logits
             attention_history[:, t - 1] = attn_weights
 
-            # Teacher Forcing
             is_teacher_forcing = random.random() < self.teacher_forcing_ratio
             top1_predicted = logits.argmax(dim=-1).unsqueeze(1)
             input_token = target[:, t].unsqueeze(1) if is_teacher_forcing else top1_predicted
 
         return outputs, attention_history
-
-# 5. STANDALONE SHAPE VERIFICATION
-if __name__ == "__main__":
-    device = torch.device("cpu")
-    SRC_VOCAB = 500
-    TGT_VOCAB = 600
-    EMB_DIM = 64
-    HIDDEN_DIM = 128
-    BATCH = 4
-    SRC_LEN = 10
-    TGT_LEN = 12
-
-    enc = Encoder(SRC_VOCAB, EMB_DIM, HIDDEN_DIM).to(device)
-    dec = Decoder(TGT_VOCAB, EMB_DIM, HIDDEN_DIM).to(device)
-
-    model = Seq2SeqAttention(enc, dec, device).to(device)
-
-    dummy_src = torch.randint(1, SRC_VOCAB, (BATCH, SRC_LEN)).to(device)
-    dummy_tgt = torch.randint(1, TGT_VOCAB, (BATCH, TGT_LEN)).to(device)
-
-    out, attns = model(dummy_src, dummy_tgt)
-    print("Attention Model Forward Pass Success!")
-    print(f"Input Source:      {dummy_src.shape}")
-    print(f"Target:            {dummy_tgt.shape}")
-    print(f"Model Logits:      {out.shape}   -> Expected [batch={BATCH}, timesteps={TGT_LEN-1}, vocab={TGT_VOCAB}]")
-    print(f"Attention Weights: {attns.shape} -> Expected [batch={BATCH}, timesteps={TGT_LEN-1}, src_len={SRC_LEN}]")
-
-
-

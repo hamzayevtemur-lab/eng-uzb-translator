@@ -1,155 +1,7 @@
 /**
  * TarjimaAI: English-to-Uzbek Neural Machine Translation
- * Interactive Frontend Engine: Inference, 2D Bahdanau Heatmap, Bipartite Flow, and Benchmarking
+ * Interactive Frontend Engine: 100% Real PyTorch Inference, 2D Bahdanau Heatmap, Bipartite Flow
  */
-
-// Preset high-fidelity demonstrations with Bahdanau attention alignments
-const DEMO_PRESETS = {
-  "I love reading books in the library.": {
-    src_tokens: ["<SOS>", "i", "love", "reading", "books", "in", "the", "library", "<EOS>"],
-    tgt_tokens: ["men", "kutubxonada", "kitoblar", "o'qishni", "yaxshi", "ko'raman", "<EOS>"],
-    attention_matrix: [
-      // [men]: attends mainly to [i]
-      [0.05, 0.85, 0.04, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01],
-      // [kutubxonada]: attends to [library], [in], [the]
-      [0.01, 0.02, 0.02, 0.02, 0.03, 0.22, 0.08, 0.58, 0.02],
-      // [kitoblar]: attends strongly to [books]
-      [0.01, 0.02, 0.03, 0.04, 0.84, 0.02, 0.01, 0.02, 0.01],
-      // [o'qishni]: attends to [reading]
-      [0.01, 0.03, 0.05, 0.82, 0.04, 0.01, 0.01, 0.02, 0.01],
-      // [yaxshi]: part of [love] / [yaxshi ko'raman]
-      [0.02, 0.72, 0.12, 0.05, 0.03, 0.01, 0.01, 0.02, 0.02],
-      // [ko'raman]: auxiliary verb attending to [love]
-      [0.02, 0.80, 0.08, 0.03, 0.02, 0.01, 0.01, 0.01, 0.02],
-      // [<EOS>]: attends to [<EOS>]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.02, 0.05, 0.86]
-    ],
-    baseline_translation: "men kutubxonada kitob o'qishni yaxshi .",
-    attention_translation: "Men kutubxonada kitoblar o'qishni yaxshi ko'raman.",
-    latency_ms: 38
-  },
-  "Tashkent is the beautiful capital city of Uzbekistan.": {
-    src_tokens: ["<SOS>", "tashkent", "is", "the", "beautiful", "capital", "city", "of", "uzbekistan", "<EOS>"],
-    tgt_tokens: ["toshkent", "o'zbekistonning", "go'zal", "poytaxti", "shahrdir", "<EOS>"],
-    attention_matrix: [
-      // [toshkent] -> [tashkent]
-      [0.02, 0.92, 0.02, 0.01, 0.01, 0.01, 0.01, 0.00, 0.00, 0.00],
-      // [o'zbekistonning] -> [uzbekistan], [of]
-      [0.01, 0.02, 0.01, 0.01, 0.02, 0.03, 0.02, 0.28, 0.58, 0.02],
-      // [go'zal] -> [beautiful]
-      [0.01, 0.01, 0.01, 0.02, 0.89, 0.03, 0.02, 0.00, 0.01, 0.00],
-      // [poytaxti] -> [capital]
-      [0.01, 0.01, 0.02, 0.02, 0.05, 0.81, 0.05, 0.01, 0.01, 0.01],
-      // [shahrdir] -> [city], [is]
-      [0.01, 0.01, 0.25, 0.02, 0.02, 0.08, 0.56, 0.02, 0.02, 0.01],
-      // [<EOS>]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.02, 0.04, 0.86]
-    ],
-    baseline_translation: "toshkent chiroyli shahar o'zbekiston .",
-    attention_translation: "Toshkent O'zbekistonning go'zal poytaxti shahrdir.",
-    latency_ms: 44
-  },
-  "Artificial intelligence is transforming modern science and technology.": {
-    src_tokens: ["<SOS>", "artificial", "intelligence", "is", "transforming", "modern", "science", "and", "technology", "<EOS>"],
-    tgt_tokens: ["sun'iy", "intellekt", "zamonaviy", "fan", "va", "texnologiyani", "o'zgartirmoqda", "<EOS>"],
-    attention_matrix: [
-      // [sun'iy] -> [artificial]
-      [0.02, 0.90, 0.05, 0.01, 0.01, 0.00, 0.00, 0.00, 0.00, 0.01],
-      // [intellekt] -> [intelligence]
-      [0.01, 0.06, 0.88, 0.02, 0.01, 0.01, 0.00, 0.00, 0.00, 0.01],
-      // [zamonaviy] -> [modern]
-      [0.01, 0.01, 0.01, 0.01, 0.03, 0.87, 0.03, 0.01, 0.01, 0.01],
-      // [fan] -> [science]
-      [0.01, 0.01, 0.01, 0.01, 0.02, 0.06, 0.84, 0.02, 0.01, 0.01],
-      // [va] -> [and]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.90, 0.01, 0.01],
-      // [texnologiyani] -> [technology]
-      [0.01, 0.01, 0.01, 0.01, 0.02, 0.02, 0.03, 0.03, 0.85, 0.01],
-      // [o'zgartirmoqda] -> [transforming], [is]
-      [0.01, 0.01, 0.02, 0.18, 0.72, 0.02, 0.01, 0.01, 0.01, 0.01],
-      // [<EOS>]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.04, 0.88]
-    ],
-    baseline_translation: "sun'iy fan va texnologiya o'zgartiradi .",
-    attention_translation: "Sun'iy intellekt zamonaviy fan va texnologiyani o'zgartirmoqda.",
-    latency_ms: 52
-  },
-  "The diligent student passed the difficult university exam.": {
-    src_tokens: ["<SOS>", "the", "diligent", "student", "passed", "the", "difficult", "university", "exam", "<EOS>"],
-    tgt_tokens: ["tirishqoq", "talaba", "qiyin", "universitet", "imtihonidan", "o'tdi", "<EOS>"],
-    attention_matrix: [
-      // [tirishqoq] -> [diligent]
-      [0.01, 0.02, 0.91, 0.03, 0.01, 0.01, 0.01, 0.00, 0.00, 0.00],
-      // [talaba] -> [student]
-      [0.01, 0.02, 0.04, 0.89, 0.01, 0.01, 0.01, 0.00, 0.00, 0.01],
-      // [qiyin] -> [difficult]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.90, 0.01, 0.01, 0.01],
-      // [universitet] -> [university]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.03, 0.90, 0.01, 0.00],
-      // [imtihonidan] -> [exam]
-      [0.01, 0.01, 0.01, 0.01, 0.02, 0.02, 0.04, 0.06, 0.81, 0.01],
-      // [o'tdi] -> [passed]
-      [0.01, 0.01, 0.02, 0.02, 0.86, 0.01, 0.02, 0.01, 0.02, 0.02],
-      // [<EOS>]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.05, 0.87]
-    ],
-    baseline_translation: "talaba universitet imtihondan o'tgan .",
-    attention_translation: "Tirishqoq talaba qiyin universitet imtihonidan o'tdi.",
-    latency_ms: 47
-  },
-  "We drank hot green tea with fresh bread.": {
-    src_tokens: ["<SOS>", "we", "drank", "hot", "green", "tea", "with", "fresh", "bread", "<EOS>"],
-    tgt_tokens: ["biz", "yangi", "non", "bilan", "issiq", "ko'k", "choy", "ichdik", "<EOS>"],
-    attention_matrix: [
-      // [biz] -> [we]
-      [0.02, 0.92, 0.02, 0.01, 0.01, 0.01, 0.00, 0.00, 0.00, 0.01],
-      // [yangi] -> [fresh]
-      [0.01, 0.01, 0.01, 0.02, 0.02, 0.02, 0.03, 0.86, 0.02, 0.00],
-      // [non] -> [bread]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.03, 0.04, 0.85, 0.01],
-      // [bilan] -> [with]
-      [0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.88, 0.02, 0.01, 0.01],
-      // [issiq] -> [hot]
-      [0.01, 0.01, 0.02, 0.90, 0.02, 0.02, 0.01, 0.00, 0.00, 0.01],
-      // [ko'k] -> [green]
-      [0.01, 0.01, 0.01, 0.02, 0.91, 0.02, 0.01, 0.00, 0.00, 0.01],
-      // [choy] -> [tea]
-      [0.01, 0.01, 0.02, 0.02, 0.03, 0.88, 0.01, 0.00, 0.00, 0.01],
-      // [ichdik] -> [drank]
-      [0.01, 0.02, 0.88, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.02],
-      // [<EOS>]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.04, 0.88]
-    ],
-    baseline_translation: "biz issiq choy va non ichdik .",
-    attention_translation: "Biz yangi non bilan issiq ko'k choy ichdik.",
-    latency_ms: 42
-  },
-  "He opened the window and looked at the blue sky.": {
-    src_tokens: ["<SOS>", "he", "opened", "the", "window", "and", "looked", "at", "the", "blue", "sky", "<EOS>"],
-    tgt_tokens: ["u", "derazani", "ochdi", "va", "moviy", "osmonga", "qaradi", "<EOS>"],
-    attention_matrix: [
-      // [u] -> [he]
-      [0.02, 0.92, 0.02, 0.01, 0.01, 0.00, 0.01, 0.00, 0.00, 0.00, 0.00, 0.01],
-      // [derazani] -> [window]
-      [0.01, 0.01, 0.03, 0.06, 0.84, 0.01, 0.01, 0.01, 0.01, 0.00, 0.00, 0.01],
-      // [ochdi] -> [opened]
-      [0.01, 0.02, 0.87, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.00, 0.00, 0.01],
-      // [va] -> [and]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.92, 0.01, 0.00, 0.00, 0.00, 0.00, 0.01],
-      // [moviy] -> [blue]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.03, 0.87, 0.01, 0.01],
-      // [osmonga] -> [sky], [at]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.03, 0.22, 0.04, 0.04, 0.60, 0.01],
-      // [qaradi] -> [looked]
-      [0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.85, 0.02, 0.01, 0.01, 0.01, 0.02],
-      // [<EOS>]
-      [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.04, 0.86]
-    ],
-    baseline_translation: "u deraza ochdi va ko'k osmon qaradi .",
-    attention_translation: "U derazani ochdi va moviy osmonga qaradi.",
-    latency_ms: 45
-  }
-};
 
 // Global App State
 const state = {
@@ -183,6 +35,7 @@ const elements = {
   pasteInputBtn: document.getElementById("pasteInputBtn"),
   listenSourceBtn: document.getElementById("listenSourceBtn"),
   translateBtn: document.getElementById("translateBtn"),
+  beamSelect: document.getElementById("beamSelect"),
 
   targetCardSingle: document.getElementById("targetCardSingle"),
   targetOutput: document.getElementById("targetOutput"),
@@ -244,7 +97,7 @@ async function checkSystemStatus() {
     if (data.english_vocab_size > 0 && data.uzbek_vocab_size > 0) {
       elements.vocabLabel.textContent = `Vocab: ${data.english_vocab_size.toLocaleString()} / ${data.uzbek_vocab_size.toLocaleString()}`;
     } else {
-      elements.vocabLabel.textContent = "Vocab: 48k Pairs";
+      elements.vocabLabel.textContent = "Vocab: Not Loaded";
     }
 
     if (data.attention_model_loaded && data.baseline_model_loaded) {
@@ -257,14 +110,14 @@ async function checkSystemStatus() {
       elements.checkpointNotice.style.display = "none";
     } else {
       state.isLiveModelReady = false;
-      elements.modelStatusLabel.textContent = "Interactive Demo Mode";
+      elements.modelStatusLabel.textContent = "Checkpoints Needed";
       elements.checkpointNotice.style.display = "flex";
     }
   } catch (err) {
-    console.warn("Backend telemetry ping error, using standalone interactive mode:", err);
+    console.warn("Backend telemetry ping error:", err);
     elements.deviceLabel.textContent = "Host Accelerated";
-    elements.vocabLabel.textContent = "Vocab: 48,000 Pairs";
-    elements.modelStatusLabel.textContent = "Interactive Demo Mode";
+    elements.vocabLabel.textContent = "Vocab: Offline";
+    elements.modelStatusLabel.textContent = "Server Offline";
     elements.checkpointNotice.style.display = "flex";
   }
 }
@@ -300,6 +153,11 @@ function setupEventListeners() {
   // Translate Button
   elements.translateBtn.addEventListener("click", () => performTranslation());
 
+  // Beam select change
+  if (elements.beamSelect) {
+    elements.beamSelect.addEventListener("change", () => performTranslation());
+  }
+
   // Keyboard shortcut: Cmd+Enter or Ctrl+Enter
   elements.sourceInput.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -324,7 +182,7 @@ function setupEventListeners() {
     });
   });
 
-  // Preset Chips
+  // Preset Chips: populate textarea and run real translation
   document.querySelectorAll(".chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       elements.sourceInput.value = chip.dataset.text;
@@ -413,7 +271,7 @@ function updateModeView() {
 }
 
 // ==========================================================================
-// Translation Execution (Live Backend + High-Fidelity Demo Fallback)
+// Translation Execution (100% Real PyTorch Inference via FastAPI Backend)
 // ==========================================================================
 async function performTranslation() {
   const text = elements.sourceInput.value.trim();
@@ -426,9 +284,8 @@ async function performTranslation() {
   elements.targetOutput.classList.add("loading");
 
   const startTime = performance.now();
+  const beamWidth = elements.beamSelect ? (parseInt(elements.beamSelect.value, 10) || 1) : 1;
 
-  // Try live API first
-  let liveData = null;
   try {
     const res = await fetch("/api/translate", {
       method: "POST",
@@ -436,106 +293,67 @@ async function performTranslation() {
       body: JSON.stringify({
         text: text,
         model_type: state.activeMode,
-        max_length: 30
+        max_length: 35,
+        beam_width: beamWidth
       })
     });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data.status === "success" && data.translated_tokens && data.translated_tokens.length > 0) {
-        liveData = data;
+    if (res.status === 503) {
+      const errData = await res.json().catch(() => ({}));
+      const detail = errData.detail || "Model checkpoints not loaded. Please train models using 'python3 src/train.py --model all' first.";
+      showToast(detail, "warning");
+      elements.outputStateLabel.textContent = "Checkpoints Needed";
+      elements.targetOutput.innerHTML = `
+        <div class="error-notice-box">
+          <strong>Model Checkpoints Needed</strong>
+          <p>${detail}</p>
+          <code>python3 src/train.py --model all</code>
+        </div>`;
+      elements.dualAttentionOutput.innerHTML = `<span style="color: var(--amber-primary);">${detail}</span>`;
+      elements.dualBaselineOutput.innerHTML = `<span style="color: var(--amber-primary);">${detail}</span>`;
+      elements.matrixContent.innerHTML = `<p class="placeholder-text" style="padding: 2.5rem; text-align: center;">Attention alignment will be dynamically rendered when models are trained and run.</p>`;
+      if (elements.flowCanvas) {
+        const ctx = elements.flowCanvas.getContext("2d");
+        ctx.clearRect(0, 0, elements.flowCanvas.width, elements.flowCanvas.height);
       }
+      return;
     }
-  } catch (err) {
-    console.log("Using interactive demo fallback for client visualization:", err);
-  }
 
-  // Handle Results
-  if (liveData) {
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const msg = errData.detail || `Translation error (${res.status})`;
+      showToast(msg, "error");
+      elements.outputStateLabel.textContent = "Error";
+      elements.targetOutput.textContent = msg;
+      return;
+    }
+
+    const data = await res.json();
+    const latency = data.latency_ms || Math.round(performance.now() - startTime);
+
     applyTranslationResults(
-      liveData.source_tokens || text.split(" "),
-      liveData.translated_tokens,
-      liveData.attention_matrix,
-      liveData.translated_text,
-      liveData.baseline_text || liveData.translated_text,
-      liveData.latency_ms
-    );
-  } else {
-    // Intelligent Fallback for demonstration & instant interactive testing
-    const fallback = resolveFallback(text);
-    const latency = Math.round(performance.now() - startTime) + 35;
-    applyTranslationResults(
-      fallback.src_tokens,
-      fallback.tgt_tokens,
-      fallback.attention_matrix,
-      fallback.attention_translation,
-      fallback.baseline_translation,
+      data.source_tokens || text.split(/\s+/),
+      data.translated_tokens || [],
+      data.attention_matrix || [],
+      data.translated_text || "(empty translation)",
+      data.baseline_text || data.translated_text || "(empty translation)",
       latency
     );
+
+    elements.outputStateLabel.textContent = "Ready";
+  } catch (err) {
+    console.error("Network or inference error:", err);
+    showToast("Failed to reach translation server.", "error");
+    elements.outputStateLabel.textContent = "Offline";
+    elements.targetOutput.innerHTML = `
+      <div class="error-notice-box">
+        <strong>Backend Server Offline</strong>
+        <p>Could not connect to translation server. Please start the server using:</p>
+        <code>python3 app/main.py</code>
+      </div>`;
+  } finally {
+    elements.targetOutput.classList.remove("loading");
   }
-
-  elements.outputStateLabel.textContent = "Ready";
-  elements.targetOutput.classList.remove("loading");
-}
-
-function resolveFallback(text) {
-  // Exact match from presets
-  if (DEMO_PRESETS[text]) {
-    return DEMO_PRESETS[text];
-  }
-
-  // Case-insensitive match from presets
-  const lower = text.toLowerCase().trim();
-  for (const [key, preset] of Object.entries(DEMO_PRESETS)) {
-    if (key.toLowerCase().trim() === lower) {
-      return preset;
-    }
-  }
-
-  // Synthetic alignment generator for any arbitrary custom user input
-  const words = text.replace(/[.,?!]/g, "").toLowerCase().split(/\s+/).filter(Boolean);
-  const src_tokens = ["<SOS>", ...words, "<EOS>"];
-  
-  // Approximate Uzbek mock tokens
-  const mockTranslations = {
-    "i": "men", "you": "siz", "he": "u", "she": "u", "we": "biz", "they": "ular",
-    "love": "yaxshi ko'raman", "like": "yoqtiraman", "read": "o'qiyman", "books": "kitoblar",
-    "book": "kitob", "student": "talaba", "school": "maktab", "university": "universitet",
-    "city": "shahar", "computer": "kompyuter", "water": "suv", "tea": "choy",
-    "good": "yaxshi", "beautiful": "chiroyli", "big": "katta", "small": "kichik"
-  };
-
-  const tgt_tokens = [];
-  words.forEach(w => {
-    tgt_tokens.push(mockTranslations[w] || `${w}lar`);
-  });
-  tgt_tokens.push("<EOS>");
-
-  // Generate plausible diagonally-dominated attention matrix
-  const matrix = [];
-  for (let t = 0; t < tgt_tokens.length; t++) {
-    const row = [];
-    let sum = 0;
-    for (let s = 0; s < src_tokens.length; s++) {
-      // Peak near diagonal or verb-reordering
-      const dist = Math.abs(t - s);
-      const val = Math.exp(-dist * 1.5) + (Math.random() * 0.08);
-      row.push(val);
-      sum += val;
-    }
-    // Normalize row to sum to 1.0 (softmax)
-    const normRow = row.map(v => Number((v / sum).toFixed(4)));
-    matrix.push(normRow);
-  }
-
-  return {
-    src_tokens,
-    tgt_tokens,
-    attention_matrix: matrix,
-    attention_translation: tgt_tokens.slice(0, -1).join(" ") + ".",
-    baseline_translation: tgt_tokens.slice(0, -1).reverse().join(" ") + ".",
-    latency_ms: 45
-  };
 }
 
 function applyTranslationResults(src_tokens, tgt_tokens, attention_matrix, attention_text, baseline_text, latency) {
@@ -567,15 +385,15 @@ function applyTranslationResults(src_tokens, tgt_tokens, attention_matrix, atten
 // 2D Attention Heatmap Grid Renderer
 // ==========================================================================
 function renderMatrix(srcTokens, tgtTokens, matrix) {
-  if (!matrix || matrix.length === 0 || !srcTokens || !tgtTokens) {
-    elements.matrixContent.innerHTML = `<p class="placeholder-text" style="padding: 2rem;">No attention matrix available.</p>`;
+  if (!matrix || matrix.length === 0 || !srcTokens || !tgtTokens || tgtTokens.length === 0) {
+    elements.matrixContent.innerHTML = `<p class="placeholder-text" style="padding: 2.5rem; text-align: center;">No attention matrix available.</p>`;
     return;
   }
 
   const table = document.createElement("table");
   table.className = "matrix-table";
 
-  // 1. Column Headers (English tokens, rotated or aligned on top)
+  // 1. Column Headers (English tokens)
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
 
@@ -656,7 +474,6 @@ function renderMatrix(srcTokens, tgtTokens, matrix) {
 
 function getCellColor(weight, palette) {
   const alpha = Math.min(Math.max(weight, 0), 1);
-  const text = alpha > 0.45 ? "#ffffff" : "rgba(255, 255, 255, 0.45)";
 
   switch (palette) {
     case "gold":
@@ -676,7 +493,6 @@ function getCellColor(weight, palette) {
       };
     case "cyan":
     default:
-      // Electric Cyan: deep sapphire to glowing neon cyan
       return {
         bg: `rgba(0, 242, 254, ${Math.max(alpha * 0.95, 0.05)})`,
         text: alpha > 0.5 ? "#07090e" : "rgba(255, 255, 255, 0.8)"
@@ -718,13 +534,13 @@ function handleCellHover(cell, tgtWord, srcWord, weight, rowIdx, colIdx) {
   if (weight > 0.6) {
     insight = `High-confidence alignment! The model focuses ${pct}% of its attention vector on "${srcWord}".`;
   } else if (weight > 0.3) {
-    insight = `Shared semantic representation across multiple words.`;
+    insight = `Shared semantic representation across tokens.`;
   } else {
-    insight = `Background contextual association.`;
+    insight = `Contextual association.`;
   }
   elements.inspectorDesc.textContent = insight;
 
-  // Re-draw flow canvas highlighting this specific curve
+  // Highlight specific ribbon connection
   highlightRibbonConnection(rowIdx, colIdx);
 }
 
@@ -783,7 +599,10 @@ function renderRibbonFlow(srcTokens, tgtTokens, matrix) {
 
 function drawRibbonCurves(highlightedRow = null, highlightedCol = null) {
   const canvas = elements.flowCanvas;
+  if (!canvas) return;
   const container = canvas.parentElement;
+  if (!container) return;
+
   canvas.width = container.clientWidth;
   canvas.height = container.clientHeight;
   const ctx = canvas.getContext("2d");
@@ -793,7 +612,7 @@ function drawRibbonCurves(highlightedRow = null, highlightedCol = null) {
   const tgtTokens = state.currentTgtTokens;
   const matrix = state.currentMatrix;
 
-  if (!srcTokens || !tgtTokens || !matrix) return;
+  if (!srcTokens || !tgtTokens || !matrix || matrix.length === 0) return;
 
   const canvasRect = canvas.getBoundingClientRect();
 
@@ -878,6 +697,8 @@ function exportHeatmapCanvas() {
 
   const cols = state.currentSrcTokens.length;
   const rows = state.currentTgtTokens.length;
+
+  if (cols === 0 || rows === 0) return;
 
   canvas.width = leftPad + cols * cellW + rightPad;
   canvas.height = topPad + rows * cellH + bottomPad;
@@ -969,6 +790,7 @@ function showToast(message, type = "info") {
   let iconName = "check-circle";
   if (type === "warning") iconName = "alert-triangle";
   if (type === "info") iconName = "info";
+  if (type === "error") iconName = "x-circle";
 
   toast.innerHTML = `<i data-lucide="${iconName}"></i><span>${message}</span>`;
   elements.toastContainer.appendChild(toast);
@@ -981,5 +803,5 @@ function showToast(message, type = "info") {
     if (toast.parentElement) {
       toast.parentElement.removeChild(toast);
     }
-  }, 3200);
+  }, 3500);
 }

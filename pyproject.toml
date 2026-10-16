@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tarjima-ai"
+version = "1.0.0"
+description = "English-to-Uzbek Neural Machine Translation featuring Bahdanau Additive Attention and 2D Alignment Matrix"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Temurbek Hamzayev", email = "hamzayevtemur@gmail.com" }
+]
+dependencies = [
+    "torch>=2.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+    "sacrebleu>=2.3.0",
+    "matplotlib>=3.7.0",
+    "tqdm>=4.65.0",
+    "requests>=2.31.0",
+    "pytest>=7.0.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "app*"]

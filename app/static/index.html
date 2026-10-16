@@ -117,7 +117,7 @@
       <i data-lucide="info" class="notice-icon"></i>
       <div class="notice-content">
         <strong>Checkpoints Status:</strong>
-        <span id="noticeText">Using interactive demonstration embeddings and attention matrices. Run <code>python3 src/train.py</code> to train custom weights on the 48k Uzbek dataset.</span>
+        <span id="noticeText">Model checkpoints not loaded. Please train models using <code>python3 src/train.py --model all</code> to run neural inference.</span>
       </div>
       <button class="btn-icon-subtle" id="closeNoticeBtn" title="Dismiss Notice">
         <i data-lucide="x"></i>
@@ -163,6 +163,13 @@
             <span id="wordCount">7 words</span>
           </div>
           <div class="action-group">
+            <div class="decoding-select-wrapper">
+              <select id="beamSelect" class="beam-dropdown" title="Decoding Strategy">
+                <option value="1">Greedy (k=1)</option>
+                <option value="3" selected>Beam Search (k=3)</option>
+                <option value="5">Beam Search (k=5)</option>
+              </select>
+            </div>
             <button class="btn-translate" id="translateBtn">
               <span class="btn-text">Translate</span>
               <i data-lucide="arrow-right"></i>

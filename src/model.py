@@ -1,35 +1,26 @@
 """
-Unified Model Interface.
-Re-exports both Baseline (without attention) and Bahdanau (with attention) architectures.
+Unified Model Architecture Factory.
+Provides shared bidirectional packed Encoder and exports both:
+1. Baseline Seq2Seq (Sutskever et al., 2014)
+2. Bahdanau Additive Attention Seq2Seq (Bahdanau et al., 2015)
 """
 
+from model_attention import (
+    Encoder,
+    BahdanauAttention,
+    Decoder as AttentionDecoder,
+    Seq2SeqAttention
+)
 from model_baseline import (
-    Encoder as BaselineEncoder,
     Decoder as BaselineDecoder,
     Seq2SeqBaseline
 )
-from model_attention import (
-    Encoder as AttentionEncoder,
-    Decoder as AttentionDecoder,
-    BahdanauAttention,
-    Seq2SeqAttention
-)
-
-# Default aliases point to the flagship Attention architecture
-Encoder = AttentionEncoder
-Decoder = AttentionDecoder
-Seq2Seq = Seq2SeqAttention
 
 __all__ = [
-    # Defaults (Attention)
     "Encoder",
-    "Decoder",
-    "Seq2Seq",
     "BahdanauAttention",
+    "AttentionDecoder",
     "Seq2SeqAttention",
-    
-    # Baseline
-    "BaselineEncoder",
     "BaselineDecoder",
     "Seq2SeqBaseline"
 ]
