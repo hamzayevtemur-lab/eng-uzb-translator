@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TarjimaAI | English-Uzbek Neural Machine Translation with Bahdanau Attention</title>
+  <meta name="description" content="State-of-the-art English to Uzbek Seq2Seq Neural Machine Translation with interactive 2D Bahdanau Additive Attention matrix visualization and side-by-side model comparison.">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Icons (Lucide via unpkg) -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Ambient background lighting effects -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+  <div class="bg-glow bg-glow-3"></div>
+
+  <!-- Navigation Bar -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-icon">
+          <i data-lucide="network"></i>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">Tarjima<span>AI</span></div>
+          <div class="brand-subtitle">English-Uzbek Seq2Seq NMT</div>
+        </div>
+      </div>
+
+      <!-- Telemetry pills -->
+      <div class="telemetry-bar">
+        <div class="telemetry-pill" id="devicePill" title="Neural Hardware Accelerator">
+          <span class="status-dot"></span>
+          <i data-lucide="cpu" class="pill-icon"></i>
+          <span id="deviceLabel">Detecting Device...</span>
+        </div>
+        <div class="telemetry-pill" id="vocabPill" title="Trained Vocabulary Size">
+          <i data-lucide="book-open" class="pill-icon"></i>
+          <span id="vocabLabel">Vocab: Eng / Uzb</span>
+        </div>
+        <div class="telemetry-pill" id="modelStatusPill" title="Loaded Model Checkpoint">
+          <i data-lucide="check-circle-2" class="pill-icon"></i>
+          <span id="modelStatusLabel">Checking Models...</span>
+        </div>
+      </div>
+
+      <!-- Header actions -->
+      <div class="header-actions">
+        <a href="#matrixSection" class="btn-ghost" title="Jump to Attention Heatmap">
+          <i data-lucide="grid"></i>
+          <span>Attention Matrix</span>
+        </a>
+        <a href="#mathSection" class="btn-ghost" title="View Mathematical Formulation">
+          <i data-lucide="binary"></i>
+          <span>Architecture & Math</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="main-container">
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+      <div class="hero-badge">
+        <i data-lucide="sparkles"></i>
+        <span>Bahdanau Additive Attention · Alignment Matrix Visualization</span>
+      </div>
+      <h1 class="hero-title">
+        Neural Machine Translation for <span class="gradient-text">English & Uzbek</span>
+      </h1>
+      <p class="hero-desc">
+        Experience bidirectional alignment, resolve English (SVO) to Uzbek (SOV) structural word-reordering, 
+        and observe token-level attention distribution in real-time.
+      </p>
+
+      <!-- Architecture Mode Selector -->
+      <div class="mode-selector-wrapper">
+        <div class="mode-selector" role="tablist">
+          <button class="mode-tab active" data-mode="attention" id="modeAttentionBtn" role="tab" aria-selected="true">
+            <i data-lucide="sparkles"></i>
+            <div class="tab-label-group">
+              <span class="tab-title">Bahdanau Attention</span>
+              <span class="tab-hint">Dynamic Context Vector</span>
+            </div>
+          </button>
+          <button class="mode-tab" data-mode="baseline" id="modeBaselineBtn" role="tab" aria-selected="false">
+            <i data-lucide="zap"></i>
+            <div class="tab-label-group">
+              <span class="tab-title">Baseline Seq2Seq</span>
+              <span class="tab-hint">Fixed Bottleneck Vector</span>
+            </div>
+          </button>
+          <button class="mode-tab" data-mode="both" id="modeBothBtn" role="tab" aria-selected="false">
+            <i data-lucide="columns-2"></i>
+            <div class="tab-label-group">
+              <span class="tab-title">Side-by-Side Dual View</span>
+              <span class="tab-hint">Direct Benchmark</span>
+            </div>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Checkpoint Notification Banner (Auto-hidden if checkpoints exist) -->
+    <div class="notice-banner" id="checkpointNotice" style="display: none;">
+      <i data-lucide="info" class="notice-icon"></i>
+      <div class="notice-content">
+        <strong>Checkpoints Status:</strong>
+        <span id="noticeText">Using interactive demonstration embeddings and attention matrices. Run <code>python3 src/train.py</code> to train custom weights on the 48k Uzbek dataset.</span>
+      </div>
+      <button class="btn-icon-subtle" id="closeNoticeBtn" title="Dismiss Notice">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+
+    <!-- Translation Studio Grid -->
+    <section class="translation-studio">
+      <!-- Input Panel (English) -->
+      <div class="studio-card source-card">
+        <div class="card-header">
+          <div class="lang-tag">
+            <span class="flag-icon">🇬🇧</span>
+            <span class="lang-name">English</span>
+            <span class="lang-role">Source</span>
+          </div>
+          <div class="card-controls">
+            <button class="btn-tool" id="clearInputBtn" title="Clear Text">
+              <i data-lucide="trash-2"></i>
+            </button>
+            <button class="btn-tool" id="pasteInputBtn" title="Paste from Clipboard">
+              <i data-lucide="clipboard-paste"></i>
+            </button>
+            <button class="btn-tool" id="listenSourceBtn" title="Listen English Pronunciation">
+              <i data-lucide="volume-2"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <textarea 
+            id="sourceInput" 
+            placeholder="Type or select an English sentence to translate into Uzbek..."
+            rows="5"
+            spellcheck="false"
+          >I love reading books in the library.</textarea>
+        </div>
+
+        <div class="card-footer">
+          <div class="stats-group">
+            <span id="charCount">36 chars</span>
+            <span class="divider">·</span>
+            <span id="wordCount">7 words</span>
+          </div>
+          <div class="action-group">
+            <button class="btn-translate" id="translateBtn">
+              <span class="btn-text">Translate</span>
+              <i data-lucide="arrow-right"></i>
+              <span class="btn-shortcut">⌘↵</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Preset Chips -->
+        <div class="preset-chips">
+          <span class="preset-label">Sample Presets:</span>
+          <button class="chip" data-text="I love reading books in the library.">
+            📚 Books in Library
+          </button>
+          <button class="chip" data-text="Tashkent is the beautiful capital city of Uzbekistan.">
+            🏛️ Tashkent City
+          </button>
+          <button class="chip" data-text="Artificial intelligence is transforming modern science and technology.">
+            💻 Artificial Intelligence
+          </button>
+          <button class="chip" data-text="The diligent student passed the difficult university exam.">
+            🎓 Diligent Student
+          </button>
+          <button class="chip" data-text="We drank hot green tea with fresh bread.">
+            🍵 Hot Green Tea
+          </button>
+          <button class="chip" data-text="He opened the window and looked at the blue sky.">
+            🌤️ Open Window
+          </button>
+        </div>
+      </div>
+
+      <!-- Output Panel (Uzbek) -->
+      <div class="studio-card target-card" id="targetCardSingle">
+        <div class="card-header">
+          <div class="lang-tag">
+            <span class="flag-icon">🇺🇿</span>
+            <span class="lang-name">O'zbek tili</span>
+            <span class="lang-role" id="currentModelBadge">Bahdanau Attention</span>
+          </div>
+          <div class="card-controls">
+            <button class="btn-tool" id="copyTargetBtn" title="Copy Translation">
+              <i data-lucide="copy"></i>
+            </button>
+            <button class="btn-tool" id="listenTargetBtn" title="Speak Uzbek Text">
+              <i data-lucide="volume-2"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="output-display" id="targetOutput">
+            <p class="placeholder-text">Translation will appear here...</p>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <div class="stats-group">
+            <span class="telemetry-tag" id="latencyTag">
+              <i data-lucide="timer"></i>
+              <span id="latencyVal">-- ms</span>
+            </span>
+            <span class="divider">·</span>
+            <span id="targetTokenCount">-- tokens</span>
+          </div>
+          <div class="status-indicator">
+            <span class="status-dot-active"></span>
+            <span id="outputStateLabel">Ready</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Side-by-Side Dual View (Toggled when "both" mode is selected) -->
+      <div class="dual-comparison-container" id="dualComparisonContainer" style="display: none;">
+        <!-- Left Sub-card: Bahdanau Attention -->
+        <div class="studio-card dual-card dual-attention">
+          <div class="card-header">
+            <div class="lang-tag">
+              <span class="model-badge badge-attention">🌟 Bahdanau Attention</span>
+            </div>
+            <button class="btn-tool copy-dual-btn" data-target="dualAttentionOutput" title="Copy">
+              <i data-lucide="copy"></i>
+            </button>
+          </div>
+          <div class="card-body">
+            <div class="output-display" id="dualAttentionOutput">
+              Men kutubxonada kitoblar o'qishni yaxshi ko'raman.
+            </div>
+          </div>
+          <div class="card-footer">
+            <span class="badge-feature">Dynamic Context Vector</span>
+            <span class="metric-good">Preserves SOV & Suffixes</span>
+          </div>
+        </div>
+
+        <!-- Right Sub-card: Baseline Seq2Seq -->
+        <div class="studio-card dual-card dual-baseline">
+          <div class="card-header">
+            <div class="lang-tag">
+              <span class="model-badge badge-baseline">⚡ Baseline Seq2Seq</span>
+            </div>
+            <button class="btn-tool copy-dual-btn" data-target="dualBaselineOutput" title="Copy">
+              <i data-lucide="copy"></i>
+            </button>
+          </div>
+          <div class="card-body">
+            <div class="output-display" id="dualBaselineOutput">
+              Men kutubxonada kitob o'qishni yaxshi.
+            </div>
+          </div>
+          <div class="card-footer">
+            <span class="badge-feature">Fixed Bottleneck Vector</span>
+            <span class="metric-warning">Information bottleneck on long tails</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Token Alignment Ribbon (Interactive Bipartite Flow) -->
+    <section class="flow-section" id="tokenRibbonSection">
+      <div class="section-header">
+        <div class="section-title-group">
+          <h2 class="section-title">
+            <i data-lucide="git-commit"></i>
+            Token Alignment Flow
+          </h2>
+          <p class="section-subtitle">
+            Visualizing the cross-lingual word order shift from English (SVO) to Uzbek (SOV agglutinative).
+          </p>
+        </div>
+      </div>
+      <div class="token-flow-container">
+        <div class="flow-track source-flow-track" id="sourceFlowTrack">
+          <!-- Populated dynamically with source tokens -->
+        </div>
+        <div class="flow-canvas-wrapper">
+          <canvas id="flowCanvas"></canvas>
+        </div>
+        <div class="flow-track target-flow-track" id="targetFlowTrack">
+          <!-- Populated dynamically with target tokens -->
+        </div>
+      </div>
+    </section>
+
+    <!-- 2D Attention Heatmap Matrix Section -->
+    <section class="matrix-section" id="matrixSection">
+      <div class="section-header">
+        <div class="section-title-group">
+          <h2 class="section-title">
+            <i data-lucide="layout-grid"></i>
+            2D Bahdanau Attention Matrix ($\alpha_{ij}$)
+          </h2>
+          <p class="section-subtitle">
+            Each cell represents the softmax attention probability assigned by decoder step $t$ to encoder hidden state $i$.
+          </p>
+        </div>
+
+        <!-- Matrix Controls -->
+        <div class="matrix-toolbar">
+          <div class="toolbar-group">
+            <label for="colormapSelect" class="toolbar-label">Colormap:</label>
+            <select id="colormapSelect" class="custom-select">
+              <option value="cyan">Electric Cyan (Default)</option>
+              <option value="gold">Solar Amber</option>
+              <option value="magma">Cosmic Magma</option>
+              <option value="emerald">Matrix Emerald</option>
+            </select>
+          </div>
+
+          <div class="toolbar-group">
+            <button class="btn-toggle active" id="toggleValuesBtn" title="Toggle numerical percentage inside cells">
+              <i data-lucide="hash"></i>
+              <span>Values</span>
+            </button>
+            <button class="btn-tool-secondary" id="exportHeatmapBtn" title="Download Heatmap Image">
+              <i data-lucide="download"></i>
+              <span>Export</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Matrix Canvas Card -->
+      <div class="matrix-card">
+        <div class="matrix-scroll-wrapper" id="matrixScrollWrapper">
+          <div class="matrix-content" id="matrixContent">
+            <!-- Dynamic 2D Grid renders here -->
+          </div>
+        </div>
+
+        <!-- Interactive Inspector / Tooltip Bar -->
+        <div class="matrix-inspector" id="matrixInspector">
+          <div class="inspector-item">
+            <span class="inspector-label">Uzbek Target Token:</span>
+            <span class="inspector-val token-uzb" id="inspectorTgtWord">—</span>
+          </div>
+          <div class="inspector-connector">
+            <i data-lucide="arrow-left-right"></i>
+          </div>
+          <div class="inspector-item">
+            <span class="inspector-label">English Source Token:</span>
+            <span class="inspector-val token-eng" id="inspectorSrcWord">—</span>
+          </div>
+          <div class="inspector-score">
+            <span class="inspector-label">Attention Weight ($\alpha$):</span>
+            <span class="inspector-val score-highlight" id="inspectorScore">—</span>
+          </div>
+          <div class="inspector-desc" id="inspectorDesc">
+            Hover over any cell or token to inspect alignment strength.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Deep-Dive Architecture & Math Section -->
+    <section class="math-section" id="mathSection">
+      <div class="section-header">
+        <div class="section-title-group">
+          <h2 class="section-title">
+            <i data-lucide="book-marked"></i>
+            Architectural Formulation & Linguistic Bridge
+          </h2>
+          <p class="section-subtitle">
+            How Bahdanau Additive Attention solves the information bottleneck for agglutinative languages.
+          </p>
+        </div>
+      </div>
+
+      <div class="math-grid">
+        <!-- Math Card 1: Additive Attention Scoring -->
+        <div class="math-card">
+          <div class="math-card-header">
+            <div class="math-step-badge">1</div>
+            <h3>Additive Attention Scoring</h3>
+          </div>
+          <p class="math-card-desc">
+            Unlike dot-product attention, Bahdanau uses a learnable feedforward network to calculate compatibility between previous decoder state $s_{t-1}$ and all encoder states $h_i$:
+          </p>
+          <div class="equation-box">
+            <code>score(s_{t-1}, h_i) = v_a^\top \tanh\left(W_a s_{t-1} + U_a h_i\right)</code>
+          </div>
+          <p class="math-card-note">
+            Where $W_a \in \mathbb{R}^{d \times d}$, $U_a \in \mathbb{R}^{d \times 2d}$ (for bidirectional encoder), and $v_a \in \mathbb{R}^{d}$.
+          </p>
+        </div>
+
+        <!-- Math Card 2: Softmax Alignment Weights -->
+        <div class="math-card">
+          <div class="math-card-header">
+            <div class="math-step-badge">2</div>
+            <h3>Softmax Probability Distribution</h3>
+          </div>
+          <p class="math-card-desc">
+            The raw alignment energy scores are normalized across source sequence tokens using the softmax function:
+          </p>
+          <div class="equation-box">
+            <code>\alpha_{t, i} = \frac{\exp(\text{score}(s_{t-1}, h_i))}{\sum_{k=1}^{T_x} \exp(\text{score}(s_{t-1}, h_k))}</code>
+          </div>
+          <p class="math-card-note">
+            $\sum_{i=1}^{T_x} \alpha_{t, i} = 1.0$. This probability distribution forms the rows of our 2D heatmap matrix!
+          </p>
+        </div>
+
+        <!-- Math Card 3: Dynamic Context Vector & Decoding -->
+        <div class="math-card">
+          <div class="math-card-header">
+            <div class="math-step-badge">3</div>
+            <h3>Dynamic Context Vector</h3>
+          </div>
+          <p class="math-card-desc">
+            Instead of forcing the entire English sentence into a single static hidden vector, decoder step $t$ computes a tailored context vector:
+          </p>
+          <div class="equation-box">
+            <code>c_t = \sum_{i=1}^{T_x} \alpha_{t, i} h_i</code>
+          </div>
+          <p class="math-card-note">
+            The Uzbek word is predicted conditioned on $[y_{t-1}; c_t]$, giving direct access to relevant source words at every decoding step.
+          </p>
+        </div>
+
+        <!-- Math Card 4: Uzbek Linguistic Alignment -->
+        <div class="math-card">
+          <div class="math-card-header">
+            <div class="math-step-badge">4</div>
+            <h3>Linguistic Structure: SVO vs SOV</h3>
+          </div>
+          <p class="math-card-desc">
+            English follows <strong>Subject-Verb-Object</strong> (e.g., <em>"I [S] love [V] books [O]"</em>), whereas Uzbek strictly adheres to <strong>Subject-Object-Verb</strong> (<em>"Men [S] kitoblarni [O] yaxshi ko'raman [V]"</em>).
+          </p>
+          <div class="linguistic-pill-group">
+            <span class="ling-pill">SVO $\to$ SOV Reordering</span>
+            <span class="ling-pill">Agglutinative Suffixes</span>
+            <span class="ling-pill">Apostrophe Normalization (o', g')</span>
+          </div>
+          <p class="math-card-note">
+            Notice how in the attention matrix, the Uzbek verb attends back to the early English verb, forming a characteristic non-diagonal alignment pattern!
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <div class="footer-content">
+        <div class="footer-left">
+          <div class="footer-brand">Tarjima<span>AI</span></div>
+          <p class="footer-text">
+            English-Uzbek Neural Machine Translation · Powered by PyTorch & FastAPI
+          </p>
+        </div>
+        <div class="footer-right">
+          <span class="footer-badge">Dataset: Jonibek21/English-Uzbek-Translation (48k)</span>
+          <span class="footer-badge">Bahdanau et al. (2015)</span>
+        </div>
+      </div>
+    </footer>
+
+  </main>
+
+  <!-- Floating Toast Notification -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Application Script -->
+  <script src="/static/app.js"></script>
+</body>
+</html>

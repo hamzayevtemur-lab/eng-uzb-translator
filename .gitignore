@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Model Weights & Checkpoints (stored in Google Drive / Hugging Face due to 100MB+ size)
+*.pth
+*.pt
+*.bin
+*.onnx
+checkpoints/*.pth
+checkpoints/*.pt
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
