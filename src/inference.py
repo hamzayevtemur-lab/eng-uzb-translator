@@ -56,6 +56,7 @@ def translate_attention(
     input_token = torch.tensor([[SOS_TOKEN]], dtype=torch.long, device=device)
     translated_tokens = []
     attention_weights_list = []
+    generated_indices = []
 
     for _ in range(max_length):
         logits, hidden, attn_weights = model.decoder(
@@ -69,11 +70,22 @@ def translate_attention(
         logits[:, SOS_TOKEN] = -float("inf")
         logits[:, UNK_TOKEN] = -float("inf")
 
+        # Repetition penalty: discourage repeating the same recent tokens
+        for prev_idx in generated_indices[-3:]:
+            logits[:, prev_idx] -= 2.0
+
         top1 = logits.argmax(dim=-1).item()
         if top1 == EOS_TOKEN:
             break
 
-        translated_tokens.append(uzb_vocab.index2word.get(top1, "<UNK>"))
+        word = uzb_vocab.index2word.get(top1, "<UNK>")
+        translated_tokens.append(word)
+        generated_indices.append(top1)
+
+        # Stop cleanly once sentence-ending punctuation is reached
+        if word in (".", "!", "?") and len(translated_tokens) > 2:
+            break
+
         input_token = torch.tensor([[top1]], dtype=torch.long, device=device)
 
     if not attention_weights_list:
@@ -110,6 +122,7 @@ def translate_baseline(
 
     input_token = torch.tensor([[SOS_TOKEN]], dtype=torch.long, device=device)
     translated_tokens = []
+    generated_indices = []
 
     for _ in range(max_length):
         logits, hidden = model.decoder(input_token, hidden)
@@ -119,11 +132,22 @@ def translate_baseline(
         logits[:, SOS_TOKEN] = -float("inf")
         logits[:, UNK_TOKEN] = -float("inf")
 
+        # Repetition penalty: discourage repeating the same recent tokens
+        for prev_idx in generated_indices[-3:]:
+            logits[:, prev_idx] -= 2.0
+
         top1 = logits.argmax(dim=-1).item()
         if top1 == EOS_TOKEN:
             break
 
-        translated_tokens.append(uzb_vocab.index2word.get(top1, "<UNK>"))
+        word = uzb_vocab.index2word.get(top1, "<UNK>")
+        translated_tokens.append(word)
+        generated_indices.append(top1)
+
+        # Stop cleanly once sentence-ending punctuation is reached
+        if word in (".", "!", "?") and len(translated_tokens) > 2:
+            break
+
         input_token = torch.tensor([[top1]], dtype=torch.long, device=device)
 
     return translated_tokens
