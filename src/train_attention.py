@@ -7,9 +7,10 @@ and saves vocabulary mapping and best model checkpoint.
 import os
 import time
 import math
+import random
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
 from dataset import (
     load_pairs,
@@ -19,6 +20,7 @@ from dataset import (
     PAD_TOKEN
 )
 from model_attention import Encoder, Decoder, Seq2SeqAttention
+from inference import translate_attention
 
 
 # ---------------------------------------------------------------------------
@@ -46,8 +48,6 @@ def train_epoch(
         outputs, _ = model(src_batch, tgt_batch)
 
         # Flatten outputs and targets for CrossEntropyLoss
-        # outputs: [(batch_size * (target_len - 1)), output_vocab_size]
-        # targets: [(batch_size * (target_len - 1))]
         output_dim = outputs.shape[-1]
         loss_outputs = outputs.contiguous().view(-1, output_dim)
         loss_targets = tgt_batch[:, 1:].contiguous().view(-1)
@@ -74,12 +74,15 @@ def evaluate_epoch(
     criterion: nn.CrossEntropyLoss,
     device: torch.device = torch.device("cpu")
 ) -> float:
-    """Evaluates validation loss with zero teacher forcing."""
+    """
+    Evaluates validation cross-entropy measuring sequence perplexity.
+    Uses teacher forcing = 1.0 to prevent positional cascade desynchronization.
+    """
     model.eval()
     total_loss = 0.0
 
     original_tf_ratio = model.teacher_forcing_ratio
-    model.teacher_forcing_ratio = 0.0  # Greedy decoding during evaluation
+    model.teacher_forcing_ratio = 1.0  # Ground-truth sequence likelihood
 
     for src_batch, tgt_batch, _ in dataloader:
         src_batch = src_batch.to(device)
@@ -119,24 +122,31 @@ def main():
     CHECKPOINT_DIR = os.path.join(PROJECT_ROOT, "checkpoints")
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-    MAX_SAMPLES = 15000       # 15k clean sentence pairs for fast, high-quality convergence
+    MAX_SAMPLES = 45000       # Use large dataset (out of 48k pairs)
+    MIN_FREQ = 2              # Filters single-occurrence rare words to avoid overfitting
     EMBEDDING_DIM = 256
     HIDDEN_DIM = 512
     BATCH_SIZE = 64
     LEARNING_RATE = 0.001
-    NUM_EPOCHS = 10
+    WEIGHT_DECAY = 1e-5       # L2 regularization
+    DROPOUT = 0.3             # Dropout regularization
+    NUM_EPOCHS = 12
     TEACHER_FORCING_RATIO = 0.5
 
     # 1. Load and normalize parallel pairs
     print(f"\n[1/5] Loading clean English-Uzbek pairs from {DATA_PATH}...")
-    pairs = load_pairs(DATA_PATH, max_samples=MAX_SAMPLES, min_length=2, max_length=20)
+    pairs = load_pairs(DATA_PATH, max_samples=MAX_SAMPLES, min_length=2, max_length=25)
     print(f"Loaded {len(pairs)} filtered sentence pairs.")
+
+    # Shuffle before splitting
+    random.seed(42)
+    random.shuffle(pairs)
 
     # 2. Split into Train (90%) and Val (10%)
     train_size = int(0.9 * len(pairs))
     val_size = len(pairs) - train_size
     train_pairs, val_pairs = pairs[:train_size], pairs[train_size:]
-    print(f"Split: {len(train_pairs)} training pairs | {len(val_pairs)} validation pairs.")
+    print(f"Split: {len(train_pairs):,} training pairs | {len(val_pairs):,} validation pairs.")
 
     # 3. Build Vocabularies
     print("\n[2/5] Building English and Uzbek vocabularies...")
@@ -147,7 +157,11 @@ def main():
         eng_vocab.add_sentence(en)
         uzb_vocab.add_sentence(uz)
 
-    print(f"Vocabulary sizes -> English: {eng_vocab.n_words} | Uzbek: {uzb_vocab.n_words}")
+    # Filter rare one-off words
+    eng_vocab.trim(min_freq=MIN_FREQ)
+    uzb_vocab.trim(min_freq=MIN_FREQ)
+
+    print(f"Final Vocabulary Sizes -> English: {eng_vocab.n_words:,} | Uzbek: {uzb_vocab.n_words:,}")
 
     # Save vocabularies for inference
     eng_vocab.save(os.path.join(CHECKPOINT_DIR, "vocab_eng.json"))
@@ -169,14 +183,14 @@ def main():
         embedding_dim=EMBEDDING_DIM,
         hidden_size=HIDDEN_DIM,
         num_layers=1,
-        dropout=0.1
+        dropout=DROPOUT
     )
     decoder = Decoder(
         output_size=uzb_vocab.n_words,
         embedding_dim=EMBEDDING_DIM,
         hidden_size=HIDDEN_DIM,
         num_layers=1,
-        dropout=0.1
+        dropout=DROPOUT
     )
     model = Seq2SeqAttention(
         encoder=encoder,
@@ -188,13 +202,15 @@ def main():
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total Trainable Parameters: {total_params:,}")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1)
     criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
 
     # 6. Training Loop
     print("\n[5/5] Starting Training...")
     best_val_loss = float("inf")
     best_model_path = os.path.join(CHECKPOINT_DIR, "seq2seq_attention.pth")
+    test_sample = "I love reading books in the library."
 
     for epoch in range(1, NUM_EPOCHS + 1):
         start_time = time.time()
@@ -202,6 +218,7 @@ def main():
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device=device)
         val_loss = evaluate_epoch(model, val_loader, criterion, device=device)
 
+        scheduler.step(val_loss)
         elapsed = time.time() - start_time
         train_ppl = math.exp(min(train_loss, 100))
         val_ppl = math.exp(min(val_loss, 100))
@@ -209,6 +226,10 @@ def main():
         print(f"Epoch {epoch:02d}/{NUM_EPOCHS:02d} [{elapsed:.1f}s] | "
               f"Train Loss: {train_loss:.4f} (PPL: {train_ppl:.2f}) | "
               f"Val Loss: {val_loss:.4f} (PPL: {val_ppl:.2f})")
+
+        # Live sample translation check
+        sample_tokens, _ = translate_attention(test_sample, model, eng_vocab, uzb_vocab, device=device)
+        print(f"  [Sample] '{test_sample}' -> '{' '.join(sample_tokens)}'")
 
         # Save checkpoint if validation loss improves
         if val_loss < best_val_loss:

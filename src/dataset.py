@@ -102,7 +102,37 @@ class Vocabulary:
             self.word2count[word] = 1
             self.n_words += 1
         else:
-            self.word2count[word]+=1
+            self.word2count[word] += 1
+
+    def trim(self, min_freq: int = 2):
+        """
+        Filters out rare words with frequency less than min_freq.
+        Rare and unseen words will automatically map to <UNK>.
+        """
+        keep_words = [w for w, c in self.word2count.items() if c >= min_freq]
+        
+        # Reset mappings
+        self.word2index = {
+            "<PAD>": PAD_TOKEN,
+            "<SOS>": SOS_TOKEN,
+            "<EOS>": EOS_TOKEN,
+            "<UNK>": UNK_TOKEN
+        }
+        self.index2word = {
+            PAD_TOKEN: "<PAD>",
+            SOS_TOKEN: "<SOS>",
+            EOS_TOKEN: "<EOS>",
+            UNK_TOKEN: "<UNK>"
+        }
+        old_count = self.n_words
+        self.n_words = 4
+
+        for word in keep_words:
+            self.word2index[word] = self.n_words
+            self.index2word[self.n_words] = word
+            self.n_words += 1
+
+        print(f"[{self.name} Vocab] Trimmed rare words (min_freq={min_freq}): {old_count:,} -> {self.n_words:,} words")
 
     def sentence_to_indices(self, sentence: str)-> List[int]:
         """Converts text sentence to a list of integer IDs (defaults to UNK)."""
