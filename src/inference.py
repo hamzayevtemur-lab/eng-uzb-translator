@@ -15,7 +15,8 @@ from dataset import (
     normalize_string,
     SOS_TOKEN,
     EOS_TOKEN,
-    PAD_TOKEN
+    PAD_TOKEN,
+    UNK_TOKEN
 )
 from model_baseline import Encoder as BaselineEncoder, Decoder as BaselineDecoder, Seq2SeqBaseline
 from model_attention import Encoder as AttentionEncoder, Decoder as AttentionDecoder, Seq2SeqAttention
