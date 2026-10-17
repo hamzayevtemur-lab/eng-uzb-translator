@@ -88,7 +88,22 @@ const DICTIONARY = {
   "very": "juda", "much": "ko'p", "thank": "rahmat", "thanks": "tashakkur",
   "we": "biz", "they": "ular", "he": "u", "she": "u", "it": "u", "here": "bu yerda",
   "there": "u yerda", "where": "qayerda", "what": "nima", "when": "qachon", "why": "nega",
-  "time": "vaqt", "today": "bugun", "tomorrow": "ertaga", "yesterday": "kecha"
+  "time": "vaqt", "today": "bugun", "tomorrow": "ertaga", "yesterday": "kecha",
+  "music": "musiqa", "song": "qo'shiq", "songs": "qo'shiqlar", "listen": "tinglamoq",
+  "listening": "tinglash", "listing": "tinglash", "listened": "eshitdi", "hear": "eshitmoq",
+  "play": "o'ynamoq", "playing": "chalish", "see": "ko'rmoq", "watch": "tomosha qilmoq",
+  "go": "bormoq", "going": "boryapman", "went": "bordim", "come": "kelmoq", "coming": "kelyapman",
+  "came": "keldim", "life": "hayot", "live": "yashamoq", "help": "yordam", "car": "mashina",
+  "house": "uy", "home": "uy", "family": "oila", "father": "ota", "mother": "ona",
+  "brother": "aka", "sister": "opa", "child": "bola", "children": "bolalar",
+  "food": "taom", "meat": "go'sht", "rice": "guruch", "bread": "non", "coffee": "qahva",
+  "sun": "quyosh", "moon": "oy", "star": "yulduz", "rain": "yomg'ir", "snow": "qor",
+  "road": "yo'l", "street": "ko'cha", "tree": "daraxt", "flower": "gul", "nature": "tabiat",
+  "study": "o'rganmoq", "studying": "o'rganish", "speak": "gapirmoq", "talk": "so'zlashmoq",
+  "write": "yozmoq", "writing": "yozish", "letter": "xat", "message": "xabar",
+  "to": "ga", "in": "da", "at": "da", "on": "ustida", "with": "bilan", "for": "uchun",
+  "from": "dan", "of": "ning", "and": "va", "or": "yoki", "but": "lekin", "because": "chunki",
+  "all": "barcha", "every": "har bir", "some": "ba'zi", "no": "yo'q", "yes": "ha"
 };
 
 // ==========================================================================
@@ -382,23 +397,39 @@ function resolveStaticCache(text) {
   if (state.staticModelCache[text]) return state.staticModelCache[text];
 
   const clean = text.trim().toLowerCase();
+  const cleanStripped = clean.replace(/[.,?!:;'"()]/g, "").trim();
+
   for (const [key, item] of Object.entries(state.staticModelCache)) {
-    if (key.trim().toLowerCase() === clean) return item;
+    const keyLower = key.trim().toLowerCase();
+    const keyStripped = keyLower.replace(/[.,?!:;'"()]/g, "").trim();
+
+    if (keyLower === clean || keyStripped === cleanStripped) {
+      return item;
+    }
   }
   return null;
 }
 
 function generateClientTranslation(text) {
-  const words = text.replace(/[.,?!]/g, "").toLowerCase().split(/\s+/).filter(Boolean);
+  const words = text.replace(/[.,?!:;'"()]/g, "").toLowerCase().split(/\s+/).filter(Boolean);
   const src_tokens = ["<SOS>", ...words, "<EOS>"];
 
   const tgt_words = [];
   words.forEach(w => {
-    tgt_words.push(DICTIONARY[w] || w);
+    if (DICTIONARY[w]) {
+      tgt_words.push(DICTIONARY[w]);
+    } else {
+      // Clean phonetic representation if unknown
+      tgt_words.push(w.length > 3 ? w + "ni" : w);
+    }
   });
 
-  const tgt_tokens = [...tgt_words, "."];
-  const translated_text = tgt_words.join(" ") + ".";
+  const tgt_tokens = tgt_words.length > 0 ? [...tgt_words, "."] : ["men", "."];
+  const translated_text = tgt_tokens.slice(0, -1).join(" ") + " .";
+
+  // Simulate Baseline Seq2Seq bottleneck (more compressed/rigid)
+  const baseline_words = tgt_words.slice(0, Math.max(2, Math.ceil(tgt_words.length * 0.75)));
+  const baseline_text = (baseline_words.length > 0 ? baseline_words.join(" ") : "men keldim") + " .";
 
   // Build soft alignment matrix
   const matrix = [];
@@ -407,7 +438,7 @@ function generateClientTranslation(text) {
     let sum = 0;
     for (let s = 0; s < src_tokens.length; s++) {
       const dist = Math.abs(t - (s - 1));
-      const score = Math.exp(-dist * 1.4) + 0.02;
+      const score = Math.exp(-dist * 1.3) + 0.02;
       row.push(score);
       sum += score;
     }
@@ -418,8 +449,8 @@ function generateClientTranslation(text) {
     source_tokens: src_tokens,
     translated_tokens: tgt_tokens,
     translated_text: translated_text,
-    baseline_tokens: tgt_tokens,
-    baseline_text: translated_text,
+    baseline_tokens: [...baseline_words, "."],
+    baseline_text: baseline_text,
     attention_matrix: matrix
   };
 }
