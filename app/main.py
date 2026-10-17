@@ -11,7 +11,7 @@ from typing import Optional, List, Dict, Any
 
 import torch
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -131,6 +131,21 @@ def serve_index():
         with open(index_file, "r", encoding="utf-8") as f:
             return f.read()
     return "<h1>TarjimaAI</h1><p>Frontend loading...</p>"
+
+
+@app.get("/style.css")
+def serve_style():
+    return FileResponse(STATIC_DIR / "style.css", media_type="text/css")
+
+
+@app.get("/app.js")
+def serve_app_js():
+    return FileResponse(STATIC_DIR / "app.js", media_type="application/javascript")
+
+
+@app.get("/real_model_cache.json")
+def serve_model_cache():
+    return FileResponse(STATIC_DIR / "real_model_cache.json", media_type="application/json")
 
 
 @app.get("/api/status")
