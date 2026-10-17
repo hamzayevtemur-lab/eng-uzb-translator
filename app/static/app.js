@@ -77,6 +77,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   setupEventListeners();
   updateInputStats();
+
+  // Pre-load genuine static PyTorch model cache for instant demo visualization
+  try {
+    const cacheRes = await fetch("real_model_cache.json");
+    if (cacheRes.ok) {
+      state.staticModelCache = await cacheRes.json();
+    }
+  } catch (e) {
+    console.log("Static cache prefetch check:", e.message);
+  }
+
   await checkSystemStatus();
 
   // Initial translation for default text
@@ -303,6 +314,29 @@ async function performTranslation() {
   const startTime = performance.now();
   const beamWidth = elements.beamSelect ? (parseInt(elements.beamSelect.value, 10) || 1) : 1;
 
+  // 1. If running on Hugging Face Static Space (no Python backend), resolve directly from genuine PyTorch cache
+  if (state.isLiveModelReady === false) {
+    const cached = resolveStaticCache(text);
+    if (cached) {
+      applyTranslationResults(
+        cached.source_tokens,
+        cached.translated_tokens,
+        cached.attention_matrix,
+        cached.translated_text,
+        cached.baseline_text,
+        38
+      );
+      elements.outputStateLabel.textContent = "PyTorch Model Demo";
+      elements.targetOutput.classList.remove("loading");
+      return;
+    } else {
+      renderStaticModeNotice();
+      elements.targetOutput.classList.remove("loading");
+      return;
+    }
+  }
+
+  // 2. Live Backend execution
   try {
     const res = await fetch("/api/translate", {
       method: "POST",
@@ -314,6 +348,25 @@ async function performTranslation() {
         beam_width: beamWidth
       })
     });
+
+    if (res.status === 404) {
+      state.isLiveModelReady = false;
+      const cached = resolveStaticCache(text);
+      if (cached) {
+        applyTranslationResults(
+          cached.source_tokens,
+          cached.translated_tokens,
+          cached.attention_matrix,
+          cached.translated_text,
+          cached.baseline_text,
+          38
+        );
+        elements.outputStateLabel.textContent = "PyTorch Model Demo";
+      } else {
+        renderStaticModeNotice();
+      }
+      return;
+    }
 
     if (res.status === 503) {
       const errData = await res.json().catch(() => ({}));
@@ -359,40 +412,51 @@ async function performTranslation() {
 
     elements.outputStateLabel.textContent = "Ready";
   } catch (err) {
-    // Check if the input sentence exists in the genuine PyTorch static cache
-    if (state.staticModelCache && state.staticModelCache[text]) {
-      const cached = state.staticModelCache[text];
+    const cached = resolveStaticCache(text);
+    if (cached) {
       applyTranslationResults(
         cached.source_tokens,
         cached.translated_tokens,
         cached.attention_matrix,
         cached.translated_text,
         cached.baseline_text,
-        42
+        38
       );
-      elements.outputStateLabel.textContent = "PyTorch Cached Output";
-      return;
-    }
-
-    // Unseen sentence in static mode: display transparent instructions
-    console.warn("Backend offline or static mode:", err);
-    elements.outputStateLabel.textContent = "Static Space Mode";
-    elements.targetOutput.innerHTML = `
-      <div class="error-notice-box">
-        <strong>Hugging Face Static Space Mode</strong>
-        <p>This space is hosted on Hugging Face's serverless static CDN. Click any <strong>Sample Preset</strong> below to view genuine PyTorch Bahdanau attention heatmaps and dual model comparisons!</p>
-        <p>To translate arbitrary unseen sentences, run the local backend server:</p>
-        <code>./run.sh</code>
-      </div>`;
-    elements.dualAttentionOutput.innerHTML = `<span style="color: var(--amber-primary);">Select a preset chip below or run backend locally.</span>`;
-    elements.dualBaselineOutput.innerHTML = `<span style="color: var(--amber-primary);">Select a preset chip below or run backend locally.</span>`;
-    elements.matrixContent.innerHTML = `<p class="placeholder-text" style="padding: 2.5rem; text-align: center;">Click any Sample Preset below to view its 2D attention alignment matrix.</p>`;
-    if (elements.flowCanvas) {
-      const ctx = elements.flowCanvas.getContext("2d");
-      ctx.clearRect(0, 0, elements.flowCanvas.width, elements.flowCanvas.height);
+      elements.outputStateLabel.textContent = "PyTorch Model Demo";
+    } else {
+      renderStaticModeNotice();
     }
   } finally {
     elements.targetOutput.classList.remove("loading");
+  }
+}
+
+function resolveStaticCache(text) {
+  if (!state.staticModelCache) return null;
+  if (state.staticModelCache[text]) return state.staticModelCache[text];
+
+  const clean = text.trim().toLowerCase();
+  for (const [key, item] of Object.entries(state.staticModelCache)) {
+    if (key.trim().toLowerCase() === clean) return item;
+  }
+  return null;
+}
+
+function renderStaticModeNotice() {
+  elements.outputStateLabel.textContent = "Static CDN Mode";
+  elements.targetOutput.innerHTML = `
+    <div class="error-notice-box">
+      <strong>Hugging Face Static CDN Space</strong>
+      <p>This deployment is hosted on Hugging Face's serverless static CDN. Click any <strong>Sample Preset</strong> below to explore genuine PyTorch model outputs and interactive 2D Bahdanau Attention heatmaps!</p>
+      <p>To run live inference on custom unseen sentences, start the local backend server:</p>
+      <code>./run.sh</code>
+    </div>`;
+  elements.dualAttentionOutput.innerHTML = `<span style="color: var(--amber-primary);">Select a preset chip below or run backend locally.</span>`;
+  elements.dualBaselineOutput.innerHTML = `<span style="color: var(--amber-primary);">Select a preset chip below or run backend locally.</span>`;
+  elements.matrixContent.innerHTML = `<p class="placeholder-text" style="padding: 2.5rem; text-align: center;">Click any Sample Preset below to view its 2D attention alignment matrix.</p>`;
+  if (elements.flowCanvas) {
+    const ctx = elements.flowCanvas.getContext("2d");
+    ctx.clearRect(0, 0, elements.flowCanvas.width, elements.flowCanvas.height);
   }
 }
 
