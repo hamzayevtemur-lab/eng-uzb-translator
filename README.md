@@ -1,3 +1,14 @@
+---
+title: TarjimaAI English-Uzbek Translator
+emoji: 🌟
+colorFrom: cyan
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
+
 # 🌟 TarjimaAI: English-to-Uzbek Neural Machine Translation (Seq2Seq)
 > **Interactive Neural Machine Translation featuring Bidirectional GRU Encoder, Bahdanau Additive Attention, Beam Search Decoding & Real-Time 2D Alignment Matrix Visualization**
 
