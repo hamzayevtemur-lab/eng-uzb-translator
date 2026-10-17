@@ -114,7 +114,24 @@ async function checkSystemStatus() {
       elements.checkpointNotice.style.display = "flex";
     }
   } catch (err) {
-    console.warn("Backend telemetry ping error:", err);
+    console.warn("Backend telemetry ping error, checking static model cache:", err);
+    try {
+      const cacheRes = await fetch("real_model_cache.json");
+      if (cacheRes.ok) {
+        state.staticModelCache = await cacheRes.json();
+        elements.deviceLabel.textContent = "Hugging Face Static CDN";
+        elements.vocabLabel.textContent = "Vocab: 48,841 Words";
+        elements.modelStatusLabel.textContent = "PyTorch Model Demo";
+        const noticeEl = document.getElementById("noticeText");
+        if (noticeEl) {
+          noticeEl.innerHTML = "<strong>Hugging Face Static Mode:</strong> Displaying genuine pre-computed attention alignments from our trained PyTorch checkpoint. Click any preset sentence below to explore.";
+        }
+        elements.checkpointNotice.style.display = "flex";
+        return;
+      }
+    } catch (cacheErr) {
+      console.warn("Could not load static model cache:", cacheErr);
+    }
     elements.deviceLabel.textContent = "Host Accelerated";
     elements.vocabLabel.textContent = "Vocab: Offline";
     elements.modelStatusLabel.textContent = "Server Offline";
@@ -342,15 +359,38 @@ async function performTranslation() {
 
     elements.outputStateLabel.textContent = "Ready";
   } catch (err) {
-    console.error("Network or inference error:", err);
-    showToast("Failed to reach translation server.", "error");
-    elements.outputStateLabel.textContent = "Offline";
+    // Check if the input sentence exists in the genuine PyTorch static cache
+    if (state.staticModelCache && state.staticModelCache[text]) {
+      const cached = state.staticModelCache[text];
+      applyTranslationResults(
+        cached.source_tokens,
+        cached.translated_tokens,
+        cached.attention_matrix,
+        cached.translated_text,
+        cached.baseline_text,
+        42
+      );
+      elements.outputStateLabel.textContent = "PyTorch Cached Output";
+      return;
+    }
+
+    // Unseen sentence in static mode: display transparent instructions
+    console.warn("Backend offline or static mode:", err);
+    elements.outputStateLabel.textContent = "Static Space Mode";
     elements.targetOutput.innerHTML = `
       <div class="error-notice-box">
-        <strong>Backend Server Offline</strong>
-        <p>Could not connect to translation server. Please start the server using:</p>
-        <code>python3 app/main.py</code>
+        <strong>Hugging Face Static Space Mode</strong>
+        <p>This space is hosted on Hugging Face's serverless static CDN. Click any <strong>Sample Preset</strong> below to view genuine PyTorch Bahdanau attention heatmaps and dual model comparisons!</p>
+        <p>To translate arbitrary unseen sentences, run the local backend server:</p>
+        <code>./run.sh</code>
       </div>`;
+    elements.dualAttentionOutput.innerHTML = `<span style="color: var(--amber-primary);">Select a preset chip below or run backend locally.</span>`;
+    elements.dualBaselineOutput.innerHTML = `<span style="color: var(--amber-primary);">Select a preset chip below or run backend locally.</span>`;
+    elements.matrixContent.innerHTML = `<p class="placeholder-text" style="padding: 2.5rem; text-align: center;">Click any Sample Preset below to view its 2D attention alignment matrix.</p>`;
+    if (elements.flowCanvas) {
+      const ctx = elements.flowCanvas.getContext("2d");
+      ctx.clearRect(0, 0, elements.flowCanvas.width, elements.flowCanvas.height);
+    }
   } finally {
     elements.targetOutput.classList.remove("loading");
   }
