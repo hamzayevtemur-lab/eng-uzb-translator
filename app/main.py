@@ -63,12 +63,30 @@ attention_model: Optional[Seq2SeqAttention] = None
 baseline_model: Optional[Seq2SeqBaseline] = None
 
 
+def ensure_checkpoint(filename: str) -> Path:
+    """Ensures checkpoint file exists locally, downloading from HF Model Hub if missing."""
+    local_path = CHECKPOINT_DIR / filename
+    if not local_path.exists():
+        try:
+            from huggingface_hub import hf_hub_download
+            print(f"[TarjimaAI] Checkpoint {filename} not found locally. Downloading from Hugging Face Hub...")
+            downloaded = hf_hub_download(
+                repo_id="TemurbekHamzaev/TarjimaAI-English-Uzbek-Seq2Seq",
+                filename=filename,
+                local_dir=str(CHECKPOINT_DIR)
+            )
+            return Path(downloaded)
+        except Exception as e:
+            print(f"[TarjimaAI] Could not download {filename} from HF Hub: {e}")
+    return local_path
+
+
 def init_models():
     """Initializes and loads available vocabularies and weights from checkpoints."""
     global eng_vocab, uzb_vocab, attention_model, baseline_model
 
-    vocab_eng_path = CHECKPOINT_DIR / "vocab_eng.json"
-    vocab_uzb_path = CHECKPOINT_DIR / "vocab_uzb.json"
+    vocab_eng_path = ensure_checkpoint("vocab_eng.json")
+    vocab_uzb_path = ensure_checkpoint("vocab_uzb.json")
 
     if vocab_eng_path.exists() and vocab_uzb_path.exists():
         try:
@@ -79,7 +97,7 @@ def init_models():
             print(f"[TarjimaAI] Error loading vocabularies: {e}")
 
     # Load Attention Model
-    attn_path = CHECKPOINT_DIR / "seq2seq_attention.pth"
+    attn_path = ensure_checkpoint("seq2seq_attention.pth")
     if attn_path.exists() and eng_vocab and uzb_vocab:
         try:
             state = torch.load(str(attn_path), map_location=DEVICE, weights_only=True)
@@ -98,7 +116,7 @@ def init_models():
             print(f"[TarjimaAI] Error loading attention model: {e}")
 
     # Load Baseline Model
-    base_path = CHECKPOINT_DIR / "seq2seq_baseline.pth"
+    base_path = ensure_checkpoint("seq2seq_baseline.pth")
     if base_path.exists() and eng_vocab and uzb_vocab:
         try:
             state = torch.load(str(base_path), map_location=DEVICE, weights_only=True)
@@ -133,17 +151,17 @@ def serve_index():
     return "<h1>TarjimaAI</h1><p>Frontend loading...</p>"
 
 
-@app.get("/style.css")
+@app.api_route("/style.css", methods=["GET", "HEAD"])
 def serve_style():
     return FileResponse(STATIC_DIR / "style.css", media_type="text/css")
 
 
-@app.get("/app.js")
+@app.api_route("/app.js", methods=["GET", "HEAD"])
 def serve_app_js():
     return FileResponse(STATIC_DIR / "app.js", media_type="application/javascript")
 
 
-@app.get("/real_model_cache.json")
+@app.api_route("/real_model_cache.json", methods=["GET", "HEAD"])
 def serve_model_cache():
     return FileResponse(STATIC_DIR / "real_model_cache.json", media_type="application/json")
 

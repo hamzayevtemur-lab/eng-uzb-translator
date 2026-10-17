@@ -133,9 +133,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   performTranslation();
 });
 
+function getApiEndpoint(path) {
+  const customUrl = localStorage.getItem("tarjima_backend_url");
+  if (customUrl) {
+    return customUrl.replace(/\/+$/, "") + path;
+  }
+  return path;
+}
+
 async function checkSystemStatus() {
   try {
-    const res = await fetch("/api/status");
+    const res = await fetch(getApiEndpoint("/api/status"));
     if (!res.ok) throw new Error("Status API unavailable");
     const data = await res.json();
     state.apiTelemetry = data;
@@ -346,7 +354,7 @@ async function performTranslation() {
   // 2. Query live PyTorch backend if server is active
   let liveData = null;
   try {
-    const res = await fetch("/api/translate", {
+    const res = await fetch(getApiEndpoint("/api/translate"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
