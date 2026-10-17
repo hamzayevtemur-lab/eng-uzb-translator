@@ -5,16 +5,28 @@ Provides shared bidirectional packed Encoder and exports both:
 2. Bahdanau Additive Attention Seq2Seq (Bahdanau et al., 2015)
 """
 
-from model_attention import (
-    Encoder,
-    BahdanauAttention,
-    Decoder as AttentionDecoder,
-    Seq2SeqAttention
-)
-from model_baseline import (
-    Decoder as BaselineDecoder,
-    Seq2SeqBaseline
-)
+try:
+    from .model_attention import (
+        Encoder,
+        BahdanauAttention,
+        Decoder as AttentionDecoder,
+        Seq2SeqAttention
+    )
+    from .model_baseline import (
+        Decoder as BaselineDecoder,
+        Seq2SeqBaseline
+    )
+except ImportError:
+    from model_attention import (
+        Encoder,
+        BahdanauAttention,
+        Decoder as AttentionDecoder,
+        Seq2SeqAttention
+    )
+    from model_baseline import (
+        Decoder as BaselineDecoder,
+        Seq2SeqBaseline
+    )
 
 __all__ = [
     "Encoder",

@@ -13,7 +13,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from dataset import PAD_TOKEN
+try:
+    from .dataset import PAD_TOKEN
+except ImportError:
+    from dataset import PAD_TOKEN
 
 
 # ---------------------------------------------------------------------------

@@ -11,8 +11,12 @@ from typing import Tuple, Optional
 import torch
 import torch.nn as nn
 
-from dataset import PAD_TOKEN
-from model_attention import Encoder  # Shared bidirectional packed encoder
+try:
+    from .dataset import PAD_TOKEN
+    from .model_attention import Encoder
+except ImportError:
+    from dataset import PAD_TOKEN
+    from model_attention import Encoder
 
 
 # ---------------------------------------------------------------------------

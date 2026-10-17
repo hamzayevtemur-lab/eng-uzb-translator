@@ -17,6 +17,7 @@ ENV/
 *.pt
 *.bin
 *.onnx
+*.zip
 checkpoints/*.pth
 checkpoints/*.pt
 
