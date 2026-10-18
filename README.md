@@ -13,10 +13,16 @@ license: mit
 > **Interactive Neural Machine Translation featuring Bidirectional GRU Encoder, Bahdanau Additive Attention, Beam Search Decoding & Real-Time 2D Alignment Matrix Visualization**
 
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![Hugging Face Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Models%20Hub-yellow.svg)](https://huggingface.co/TemurbekHamzaev/TarjimaAI-English-Uzbek-Seq2Seq)
+[![Live Demo](https://img.shields.io/badge/%F0%9F%8C%9F%20Live%20Demo-Web%20App-blue.svg)](https://temurbekhamzaev-tarjimaai-english-uzbek-translator.static.hf.space/index.html)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Tests](https://img.shields.io/badge/Tests-5%2F5%20Passing-brightgreen.svg)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/hamzayevtemur-lab/eng-uzb-translator)
+
+> 🚀 **Official Model Checkpoints**: [https://huggingface.co/TemurbekHamzaev/TarjimaAI-English-Uzbek-Seq2Seq](https://huggingface.co/TemurbekHamzaev/TarjimaAI-English-Uzbek-Seq2Seq)  
+> 🌐 **Interactive Web Demonstration**: [https://temurbekhamzaev-tarjimaai-english-uzbek-translator.static.hf.space/index.html](https://temurbekhamzaev-tarjimaai-english-uzbek-translator.static.hf.space/index.html)
+
 
 ---
 
