@@ -32,5 +32,5 @@ USER user
 # Hugging Face Spaces exposes port 7860
 EXPOSE 7860
 
-# Launch FastAPI web application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Launch FastAPI web application (supports dynamic $PORT on Render, defaults to 7860)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
